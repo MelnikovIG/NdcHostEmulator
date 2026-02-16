@@ -205,10 +205,7 @@ class Program
             
         if (Directory.Exists(_filesDirectory))
         {
-            foreach (var filePath in Directory.GetFiles(_filesDirectory))
-            {
-                files.Add(new FileInfo(filePath));
-            }
+            files = Directory.GetFiles(_filesDirectory).Select(filePath => new FileInfo(filePath)).OrderBy(file => file.Name).ToList();
         }
             
         return files;
@@ -382,13 +379,6 @@ class Program
             };
 
             AnsiConsole.Write(panel);
-
-            // Подтверждение отправки
-            if (!AnsiConsole.Confirm("[yellow]Отправить этот файл?[/]", true))
-            {
-                LogMessage("Отмена отправки файла", "SYSTEM", ConsoleColor.Gray);
-                return;
-            }
 
             // Отправка файла
             var fileData = await File.ReadAllTextAsync(selectedFile.FullName);
