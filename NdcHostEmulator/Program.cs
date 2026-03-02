@@ -7,119 +7,154 @@ namespace NdcHostEmulator;
 
 class Program
 {
-    private static TcpClient _currentClient;
+    private static TcpClient? _currentClient;
     private static bool _isRunning = true;
+    private static bool _isClientConnected = false;
     private static string _currentClientInfo = string.Empty;
-    private static NetworkStream _clientStream;
+    private static NetworkStream? _clientStream;
     private static string _filesDirectory = "./Files";
-    private static StreamReader _clientReader;
     private static CancellationTokenSource _readCancellationSource = new();
+    private static CancellationTokenSource _menuCancellationSource = new();
     private static bool _isReadingIncoming = false;
 
     static async Task Main(string[] args)
     {
-        // Показываем список файлов в директории
         ShowAvailableFiles();
 
-        // Выбор порта
         var port = AnsiConsole.Prompt(
             new TextPrompt<int>("[green]Введите порт для прослушивания (1-65535):[/]")
                 .DefaultValue(4070)
-                .Validate(p => p >= 1 && p <= 65535 ? ValidationResult.Success() 
+                .Validate(p => p >= 1 && p <= 65535
+                    ? ValidationResult.Success()
                     : ValidationResult.Error("[red]Порт должен быть от 1 до 65535[/]")));
 
-        // Запуск сервера
         var listener = new TcpListener(IPAddress.Any, port);
         listener.Start();
 
         AnsiConsole.MarkupLine($"[green]✓ Сервер запущен на порту {port}[/]");
-        AnsiConsole.MarkupLine("[yellow]Ожидание подключения...[/]");
 
-        // Основной цикл сервера
         while (_isRunning)
         {
             try
             {
-                // Принимаем только одно соединение
-                if (_currentClient == null || !_currentClient.Connected)
-                {
-                    _currentClient = await listener.AcceptTcpClientAsync();
-                    _currentClientInfo = _currentClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
-                    _clientStream = _currentClient.GetStream();
-                    _clientReader = new StreamReader(_clientStream, Encoding.UTF8);
-                        
-                    LogMessage($"✅ Подключен: {_currentClientInfo}", "CONNECT", ConsoleColor.Green);
-                        
-                    // Запускаем чтение входящих данных
-                    _readCancellationSource = new CancellationTokenSource();
-                    _isReadingIncoming = true;
-                    _ = Task.Run(() => ReadIncomingDataAsync(_readCancellationSource.Token));
-                        
-                    // Показываем меню управления
-                    _ = Task.Run(() => ShowControlMenuAsync());
-                }
-                else
-                {
-                    // Если клиент уже подключен, ждем
-                    await Task.Delay(1000);
-                }
+                ShowWaitingForConnection();
+
+                _currentClient = await listener.AcceptTcpClientAsync();
+                _currentClientInfo = _currentClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
+                _clientStream = _currentClient.GetStream();
+                _isClientConnected = true;
+
+                LogMessage($"✅ Подключен: {_currentClientInfo}", "CONNECT", ConsoleColor.Green);
+
+                // Запускаем чтение входящих данных
+                _readCancellationSource = new CancellationTokenSource();
+                _menuCancellationSource = new CancellationTokenSource();
+                _isReadingIncoming = true;
+
+                _ = Task.Run(() => ReadIncomingDataAsync(_readCancellationSource.Token));
+
+                // Показываем меню и ждём завершения сессии
+                await ShowControlMenuAsync(_menuCancellationSource.Token);
+
+                CleanupConnection();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (_isRunning)
             {
                 LogMessage($"❌ Ошибка сервера: {ex.Message}", "ERROR", ConsoleColor.Red);
+                CleanupConnection();
             }
         }
 
         listener.Stop();
+        AnsiConsole.MarkupLine("[yellow]Сервер остановлен.[/]");
+    }
+
+    static void ShowWaitingForConnection()
+    {
+        AnsiConsole.WriteLine();
+        var rule = new Rule("[yellow]Ожидание подключения...[/]");
+        rule.Style = Style.Parse("yellow");
+        AnsiConsole.Write(rule);
+        AnsiConsole.WriteLine();
+    }
+
+    static async Task HandleClientDisconnectedAsync()
+    {
+        if (!_isClientConnected) return;
+
+        _isClientConnected = false;
+        LogMessage($"🔌 Клиент {_currentClientInfo} отключился", "DISCONNECT", ConsoleColor.Yellow);
+
+        // Отменяем меню — оно само выйдет из цикла
+        _readCancellationSource.Cancel();
+        _menuCancellationSource.Cancel();
+    }
+
+    static void CleanupConnection()
+    {
+        try
+        {
+            _readCancellationSource.Cancel();
+            _menuCancellationSource.Cancel();
+            _clientStream?.Close();
+            _currentClient?.Close();
+        }
+        catch { /* ignore */ }
+        finally
+        {
+            _currentClient = null;
+            _clientStream = null;
+            _isReadingIncoming = false;
+            _isClientConnected = false;
+        }
     }
 
     static async Task ReadIncomingDataAsync(CancellationToken cancellationToken)
     {
         var buffer = new byte[4096];
-            
+
         try
         {
-            while (_currentClient != null && 
-                   _currentClient.Connected && 
-                   !cancellationToken.IsCancellationRequested)
+            while (_isClientConnected && !cancellationToken.IsCancellationRequested)
             {
-                // Проверяем, есть ли данные для чтения
                 if (_clientStream != null && _clientStream.DataAvailable)
                 {
                     int bytesRead = await _clientStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
-                        
-                    if (bytesRead > 0)
+
+                    if (bytesRead == 0)
                     {
-                        var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        LogMessage($"📥 Входящие данные ({bytesRead} байт):", "INCOMING", ConsoleColor.Yellow);
-                            
-                        // Выводим данные в удобном формате
-                        if (IsPrintableText(data))
-                        {
-                            LogMessage($"   {EscapeControlCharacters(data)}", "DATA", ConsoleColor.Gray);
-                        }
-                        else
-                        {
-                            LogMessage($"   Бинарные данные: {bytesRead} байт", "DATA", ConsoleColor.Gray);
-                            LogMessage($"   Hex: {BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", "HEX", ConsoleColor.DarkCyan);
-                            LogMessage($"   UTF8: {Encoding.UTF8.GetString(buffer[..bytesRead])}", "UTF8", ConsoleColor.DarkCyan);
-                        }
+                        await HandleClientDisconnectedAsync();
+                        break;
+                    }
+
+                    var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    LogMessage($"📥 Входящие данные ({bytesRead} байт):", "INCOMING", ConsoleColor.Yellow);
+
+                    if (IsPrintableText(data))
+                        LogMessage($"   {EscapeControlCharacters(data)}", "DATA", ConsoleColor.Gray);
+                    else
+                    {
+                        LogMessage($"   Бинарные данные: {bytesRead} байт", "DATA", ConsoleColor.Gray);
+                        LogMessage($"   Hex: {BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", "HEX", ConsoleColor.DarkCyan);
                     }
                 }
                 else
                 {
-                    // Небольшая задержка чтобы не нагружать CPU
+                    if (_currentClient != null && !IsSocketConnected(_currentClient))
+                    {
+                        await HandleClientDisconnectedAsync();
+                        break;
+                    }
+
                     await Task.Delay(100, cancellationToken);
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            // Ожидаемое исключение при отмене
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            LogMessage($"❌ Ошибка чтения входящих данных: {ex.Message}", "ERROR", ConsoleColor.Red);
+            LogMessage($"❌ Ошибка чтения: {ex.Message}", "ERROR", ConsoleColor.Red);
+            await HandleClientDisconnectedAsync();
         }
         finally
         {
@@ -127,216 +162,169 @@ class Program
         }
     }
 
-    static bool IsPrintableText(string text)
+    static bool IsSocketConnected(TcpClient client)
     {
-        foreach (char c in text)
+        try
         {
-            if (c < 32 && c != '\n' && c != '\r' && c != '\t')
-                return false;
-            if (c > 126 && c < 160)
-                return false;
+            var socket = client.Client;
+            return !(socket.Poll(1, SelectMode.SelectRead) && socket.Available == 0);
         }
-        return true;
+        catch { return false; }
     }
 
-    static string EscapeControlCharacters(string text)
+    // ─────────────────────────────────────────────────────────────────────────
+    //  МЕНЮ — полностью на Console.ReadKey, прерывается через CancellationToken
+    // ─────────────────────────────────────────────────────────────────────────
+
+    static readonly (string Icon, string Label)[] MenuItems =
     {
-        return text
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t")
-            .Replace("\0", "\\0");
-    }
+        ("📁", "Выбрать и отправить файл"),
+        ("📤", "Отправить произвольный текст"),
+        ("📤", "Отправить HEX данные"),
+        ("🔄", "Обновить список файлов"),
+        ("📊", "Статус соединения"),
+        ("⏸️", "Пауза логгирования"),
+        ("▶️",  "Возобновить логгирование"),
+        ("📝", "Показать логи"),
+        ("🧹", "Очистить логи"),
+        ("❌", "Отключить клиента"),
+        ("🚪", "Выйти из программы"),
+    };
 
-    static void ShowAvailableFiles()
+    static async Task ShowControlMenuAsync(CancellationToken cancellationToken)
     {
-        // Создаем директорию если её нет
-        if (!Directory.Exists(_filesDirectory))
+        while (_isRunning && _isClientConnected && !cancellationToken.IsCancellationRequested)
         {
-            Directory.CreateDirectory(_filesDirectory);
-            LogMessage($"📁 Папка '{_filesDirectory}' создана (пустая)", "SYSTEM", ConsoleColor.Blue);
-        }
+            // Рисуем меню
+            DrawMenu();
 
-        var files = GetAvailableFiles();
-            
-        if (files.Count == 0)
-        {
-            AnsiConsole.MarkupLine($"[yellow]В папке '{_filesDirectory}' нет файлов[/]");
-            AnsiConsole.MarkupLine($"[grey]Поместите файлы в папку: {Path.GetFullPath(_filesDirectory)}[/]");
-            return;
-        }
+            // Читаем нажатие клавиши — неблокирующий опрос
+            int choice = await WaitForMenuChoiceAsync(cancellationToken);
 
-        var table = new Table();
-        table.Border(TableBorder.Rounded);
-        table.Title($"[blue]📁 Доступные файлы в папке '{_filesDirectory}'[/]");
-            
-        table.AddColumn(new TableColumn("[green]#[/]").Centered());
-        table.AddColumn("[green]Имя файла[/]");
-        table.AddColumn(new TableColumn("[green]Размер[/]").RightAligned());
-        table.AddColumn("[green]Тип[/]");
-        table.AddColumn("[green]Дата изменения[/]");
+            if (choice < 0)
+            {
+                // Токен отменён (клиент отключился или выход)
+                // Стираем меню с экрана
+                ClearMenuFromConsole();
+                break;
+            }
 
-        int index = 1;
-        foreach (var file in files)
-        {
-            var fileType = GetFileType(file.Extension.ToLower());
-            var typeColor = GetFileTypeColor(fileType);
-                
-            table.AddRow(
-                $"[yellow]{index}[/]",
-                file.Name,
-                $"[cyan]{file.Length:N0}[/] байт",
-                $"[{typeColor}]{fileType}[/]",
-                $"[grey]{file.LastWriteTime:dd.MM.yy HH:mm}[/]");
-            index++;
-        }
+            // Стираем меню перед выполнением команды
+            ClearMenuFromConsole();
 
-        AnsiConsole.Write(table);
-        LogMessage($"📊 Всего файлов: {files.Count}", "SYSTEM", ConsoleColor.Blue);
-    }
-
-    static List<FileInfo> GetAvailableFiles()
-    {
-        var files = new List<FileInfo>();
-            
-        if (Directory.Exists(_filesDirectory))
-        {
-            files = Directory.GetFiles(_filesDirectory).Select(filePath => new FileInfo(filePath)).OrderBy(file => file.Name).ToList();
-        }
-            
-        return files;
-    }
-
-    static string GetFileType(string extension)
-    {
-        return extension switch
-        {
-            ".txt" => "Текст",
-            ".json" => "JSON",
-            ".xml" => "XML",
-            ".csv" => "CSV",
-            ".bin" => "Бинарный",
-            ".dat" => "Данные",
-            ".log" => "Лог",
-            ".cfg" or ".config" => "Конфиг",
-            ".jpg" or ".jpeg" => "Изображение",
-            ".png" => "Изображение",
-            ".gif" => "Изображение",
-            ".pdf" => "PDF",
-            ".zip" or ".rar" => "Архив",
-            ".exe" => "Программа",
-            ".dll" => "Библиотека",
-            _ => "Другой"
-        };
-    }
-
-    static string GetFileTypeColor(string fileType)
-    {
-        return fileType switch
-        {
-            "Текст" => "green",
-            "JSON" => "yellow",
-            "XML" => "orange1",
-            "CSV" => "cyan",
-            "Бинарный" => "magenta",
-            "Данные" => "blue",
-            "Лог" => "grey",
-            "Конфиг" => "purple",
-            "Изображение" => "springgreen1",
-            "PDF" => "red",
-            "Архив" => "darkorange",
-            "Программа" => "red1",
-            "Библиотека" => "darkcyan",
-            _ => "white"
-        };
-    }
-
-    static async Task ShowControlMenuAsync()
-    {
-        while (_isRunning && _currentClient != null && _currentClient.Connected)
-        {
-            AnsiConsole.WriteLine();
-            var choice = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[green]Выберите действие:[/]")
-                    .PageSize(12)
-                    .AddChoices(new[]
-                    {
-                        "📁 Выбрать и отправить файл",
-                        "📤 Отправить произвольный текст",
-                        "📤 Отправить HEX данные",
-                        "🔄 Обновить список файлов",
-                        "📊 Статус соединения",
-                        "⏸️ Пауза логгирования",
-                        "▶️ Возобновить логгирование",
-                        "📝 Показать логи",
-                        "🧹 Очистить логи",
-                        "❌ Отключить клиента",
-                        "🚪 Выйти из программы"
-                    }));
+            if (!_isClientConnected)
+                break;
 
             switch (choice)
             {
-                case "📁 Выбрать и отправить файл":
-                    await SendFileAsync();
-                    break;
-                        
-                case "📤 Отправить произвольный текст":
-                    await SendCustomTextAsync();
-                    break;
-                        
-                case "📤 Отправить HEX данные":
-                    await SendHexDataAsync();
-                    break;
-                        
-                case "🔄 Обновить список файлов":
-                    ShowAvailableFiles();
-                    break;
-                        
-                case "📊 Статус соединения":
-                    ShowConnectionStatus();
-                    break;
-                        
-                case "⏸️ Пауза логгирования":
-                    PauseLogging();
-                    break;
-                        
-                case "▶️ Возобновить логгирование":
-                    ResumeLogging();
-                    break;
-                        
-                case "📝 Показать логи":
-                    ShowLogs();
-                    break;
-                        
-                case "🧹 Очистить логи":
-                    ClearLogs();
-                    break;
-                        
-                case "❌ Отключить клиента":
+                case 0: await SendFileAsync(); break;
+                case 1: await SendCustomTextAsync(); break;
+                case 2: await SendHexDataAsync(); break;
+                case 3: ShowAvailableFiles(); break;
+                case 4: ShowConnectionStatus(); break;
+                case 5: PauseLogging(); break;
+                case 6: ResumeLogging(); break;
+                case 7: ShowLogs(); break;
+                case 8: ClearLogs(); break;
+                case 9:
                     await DisconnectClientAsync();
                     return;
-                        
-                case "🚪 Выйти из программы":
+                case 10:
                     _isRunning = false;
                     return;
             }
         }
     }
 
+    // Сколько строк занимает меню (для очистки)
+    private static int _menuLineCount = 0;
+
+    static void DrawMenu()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine("  ┌─────────────────────────────────────────┐");
+        sb.AppendLine("  │           Управление соединением        │");
+        sb.AppendLine("  ├─────────────────────────────────────────┤");
+
+        for (int i = 0; i < MenuItems.Length; i++)
+        {
+            var (icon, label) = MenuItems[i];
+            sb.AppendLine($"  │  [{i + 1,2}]  {icon}  {label,-30}│");
+        }
+
+        sb.AppendLine("  └─────────────────────────────────────────┘");
+        sb.Append("  Выберите пункт (1–11): ");
+
+        var text = sb.ToString();
+        _menuLineCount = text.Count(c => c == '\n') + 1;
+
+        Console.Write(text);
+    }
+
+    static void ClearMenuFromConsole()
+    {
+        try
+        {
+            // Поднимаемся на _menuLineCount строк и очищаем их
+            for (int i = 0; i < _menuLineCount; i++)
+            {
+                Console.CursorTop = Math.Max(0, Console.CursorTop - 1);
+                Console.Write(new string(' ', Console.WindowWidth));
+                Console.CursorLeft = 0;
+            }
+        }
+        catch
+        {
+            // Если консоль не поддерживает позиционирование — просто пропускаем
+        }
+    }
+
+    /// <summary>
+    /// Ждёт нажатия цифровой клавиши (1–11).
+    /// Возвращает индекс (0-based) или -1 если токен отменён.
+    /// </summary>
+    static async Task<int> WaitForMenuChoiceAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (Console.KeyAvailable)
+            {
+                var key = Console.ReadKey(intercept: true);
+
+                // Поддержка 1–9
+                if (key.KeyChar >= '1' && key.KeyChar <= '9')
+                    return key.KeyChar - '1';
+
+                // 10 и 11 вводим как '0' и '-' для удобства,
+                // либо ждём Enter после двузначного числа
+                // Простой вариант: используем цифровую клавиатуру 0 = пункт 10, - = пункт 11
+                if (key.KeyChar == '0') return 9;   // "Отключить клиента"
+                if (key.Key == ConsoleKey.OemMinus || key.KeyChar == '-') return 10; // "Выйти"
+            }
+
+            await Task.Delay(50, cancellationToken).ContinueWith(_ => { }); // не бросаем исключение
+        }
+
+        return -1; // токен отменён
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Остальные методы без изменений
+    // ─────────────────────────────────────────────────────────────────────────
+
     static async Task SendFileAsync()
     {
         try
         {
             var files = GetAvailableFiles();
-                
+
             if (files.Count == 0)
             {
                 LogMessage($"❌ В папке '{_filesDirectory}' нет файлов", "ERROR", ConsoleColor.Red);
                 return;
             }
 
-            // Создаем список файлов для выбора
             var fileChoices = new List<string>();
             foreach (var file in files)
             {
@@ -351,102 +339,45 @@ class Program
                     .PageSize(15)
                     .AddChoices(fileChoices));
 
-            if (selected == "❌ Отмена")
-            {
-                LogMessage("Отмена отправки файла", "SYSTEM", ConsoleColor.Gray);
-                return;
-            }
+            if (selected == "❌ Отмена") return;
 
-            // Получаем индекс выбранного файла
             int fileIndex = fileChoices.IndexOf(selected);
             var selectedFile = files[fileIndex];
 
-            // Показываем информацию о файле
-            var panel = new Panel($"""
-                                   [bold]Имя файла:[/] {selectedFile.Name}
-                                   [bold]Размер:[/] {selectedFile.Length:N0} байт
-                                   [bold]Тип:[/] {GetFileType(selectedFile.Extension.ToLower())}
-                                   [bold]Дата изменения:[/] {selectedFile.LastWriteTime:dd.MM.yyyy HH:mm:ss}
-                                   """)
-            {
-                Header = new PanelHeader("[blue]Информация о файле[/]"),
-                Border = BoxBorder.Rounded,
-                Padding = new Padding(1, 1, 1, 1)
-            };
-
-            AnsiConsole.Write(panel);
-
-            // Отправка файла
             var fileData = await File.ReadAllTextAsync(selectedFile.FullName);
-            var fileDataCommands = fileData.Split("[FIELD]")
-                .Where(x => x.Length > 0)
-                .ToArray();
-            
+            var commands = fileData.Split("[FIELD]").Where(x => x.Length > 0).ToArray();
+
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var totalSentBytes = 0;
-            
-            AnsiConsole.Status()
-                .Start("Отправка файла...", ctx =>
+
+            AnsiConsole.Status().Start("Отправка файла...", ctx =>
+            {
+                ctx.Spinner(Spinner.Known.Dots);
+                ctx.SpinnerStyle(Style.Parse("green"));
+
+                for (int i = 0; i < commands.Length; i++)
                 {
-                    ctx.Spinner(Spinner.Known.Dots);
-                    ctx.SpinnerStyle(Style.Parse("green"));
+                    var byteData = Encoding.UTF8.GetBytes(commands[i]);
+                    byte[] header = { (byte)(byteData.Length / 256), (byte)(byteData.Length % 256) };
 
-                    var i = 0;
-                    foreach (var fileDataCommand in fileDataCommands)
+                    if (_clientStream is { CanWrite: true })
                     {
-                        var byteData = Encoding.UTF8.GetBytes(fileDataCommand);
-                        
-                        byte[] headerBytes = new byte[2]
-                        {
-                            (byte)(byteData.Length / 256),
-                            (byte)(byteData.Length % 256)
-                        };
+                        _clientStream.Write(header);
+                        _clientStream.Write(byteData);
+                        totalSentBytes += byteData.Length;
 
-                        if (_clientStream != null && _clientStream.CanWrite)
-                        {
-                            _clientStream.Write(headerBytes); // header bytes
-                            _clientStream.Write(byteData); //data
-                            
-                            totalSentBytes += byteData.Length;
-                            
-                            // Логируем отправку
-                            LogMessage($"📤 Отправлено {byteData.Length} байт (комманда {i++} из {fileDataCommands.Length})", "OUTGOING", ConsoleColor.Green);
-                                    
-                            // Обновляем статус
-                            var elapsed = stopwatch.Elapsed.TotalSeconds;
-                            var speed = elapsed > 0 ? totalSentBytes / elapsed : 0;
-                            ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
-                        }
-                        else
-                        {
-                            throw new Exception("Соединение разорвано");
-                        }
+                        LogMessage($"📤 Команда {i + 1}/{commands.Length} — {byteData.Length} байт", "OUTGOING", ConsoleColor.Green);
+
+                        var speed = stopwatch.Elapsed.TotalSeconds > 0 ? totalSentBytes / stopwatch.Elapsed.TotalSeconds : 0;
+                        ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
                     }
-                });
+                    else throw new Exception("Соединение разорвано");
+                }
+            });
 
             stopwatch.Stop();
-
-            var elapsedTime = stopwatch.Elapsed.TotalSeconds;
-            var speed = elapsedTime > 0 ? totalSentBytes / elapsedTime : 0;
-                    
-            LogMessage($"✅ Файл отправлен: {selectedFile.Name} ({totalSentBytes} байт, {speed:N0} байт/сек)", "SYSTEM", ConsoleColor.Green);
-                    
-            var resultPanel = new Panel($"""
-                                         [green]✓ Файл успешно отправлен![/]
-
-                                         [bold]Имя файла:[/] {selectedFile.Name}
-                                         [bold]Размер:[/] {totalSentBytes:N0} байт
-                                         [bold]Время:[/] {elapsedTime:F2} секунд
-                                         [bold]Скорость:[/] {speed:N0} байт/сек
-                                         [bold]Клиент:[/] {_currentClientInfo}
-                                         """)
-            {
-                Border = BoxBorder.Rounded,
-                BorderStyle = new Style(Color.Green),
-                Padding = new Padding(1, 1, 1, 1)
-            };
-                    
-            AnsiConsole.Write(resultPanel);
+            var elapsed = stopwatch.Elapsed.TotalSeconds;
+            LogMessage($"✅ Отправлен: {selectedFile.Name} ({totalSentBytes} байт, {elapsed:F2} сек)", "SYSTEM", ConsoleColor.Green);
         }
         catch (Exception ex)
         {
@@ -458,96 +389,56 @@ class Program
     {
         try
         {
-            var text = AnsiConsole.Prompt(
-                new TextPrompt<string>("[green]Введите текст для отправки:[/]")
-                    .AllowEmpty());
-
-            if (string.IsNullOrEmpty(text))
-            {
-                LogMessage("Текст не введен", "SYSTEM", ConsoleColor.Gray);
-                return;
-            }
+            var text = AnsiConsole.Prompt(new TextPrompt<string>("[green]Введите текст:[/]").AllowEmpty());
+            if (string.IsNullOrEmpty(text)) return;
 
             var bytes = Encoding.UTF8.GetBytes(text);
-                
-            if (_clientStream != null && _clientStream.CanWrite)
+            if (_clientStream is { CanWrite: true })
             {
-                await _clientStream.WriteAsync(bytes, 0, bytes.Length);
-                    
-                LogMessage($"📤 Отправлен текст ({bytes.Length} байт):", "OUTGOING", ConsoleColor.Green);
-                LogMessage($"   {EscapeControlCharacters(text)}", "DATA", ConsoleColor.Gray);
+                await _clientStream.WriteAsync(bytes);
+                LogMessage($"📤 Отправлен текст ({bytes.Length} байт): {EscapeControlCharacters(text)}", "OUTGOING", ConsoleColor.Green);
             }
         }
-        catch (Exception ex)
-        {
-            LogMessage($"❌ Ошибка отправки текста: {ex.Message}", "ERROR", ConsoleColor.Red);
-        }
+        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
     }
 
     static async Task SendHexDataAsync()
     {
         try
         {
-            var hexInput = AnsiConsole.Prompt(
-                new TextPrompt<string>("[green]Введите HEX данные (например: 48 65 6C 6C 6F):[/]")
-                    .AllowEmpty());
+            var hexInput = AnsiConsole.Prompt(new TextPrompt<string>("[green]Введите HEX (например: 48 65 6C 6C 6F):[/]").AllowEmpty());
+            if (string.IsNullOrEmpty(hexInput)) return;
 
-            if (string.IsNullOrEmpty(hexInput))
-            {
-                LogMessage("HEX данные не введены", "SYSTEM", ConsoleColor.Gray);
-                return;
-            }
-
-            // Преобразуем HEX строку в байты
             hexInput = hexInput.Replace(" ", "").Replace("-", "").Replace("0x", "");
-                
-            if (hexInput.Length % 2 != 0)
-            {
-                LogMessage("❌ Неверный формат HEX данных (должно быть четное количество символов)", "ERROR", ConsoleColor.Red);
-                return;
-            }
+            if (hexInput.Length % 2 != 0) { LogMessage("❌ Неверный формат HEX", "ERROR", ConsoleColor.Red); return; }
 
             var bytes = new byte[hexInput.Length / 2];
             for (int i = 0; i < bytes.Length; i++)
-            {
                 bytes[i] = Convert.ToByte(hexInput.Substring(i * 2, 2), 16);
-            }
 
-            if (_clientStream != null && _clientStream.CanWrite)
+            if (_clientStream is { CanWrite: true })
             {
-                await _clientStream.WriteAsync(bytes, 0, bytes.Length);
-                    
-                LogMessage($"📤 Отправлены HEX данные ({bytes.Length} байт):", "OUTGOING", ConsoleColor.Green);
-                LogMessage($"   Hex: {BitConverter.ToString(bytes).Replace("-", " ")}", "HEX", ConsoleColor.DarkCyan);
-                    
-                var text = Encoding.UTF8.GetString(bytes);
-                if (IsPrintableText(text))
-                {
-                    LogMessage($"   Текст: {EscapeControlCharacters(text)}", "TEXT", ConsoleColor.Gray);
-                }
+                await _clientStream.WriteAsync(bytes);
+                LogMessage($"📤 HEX отправлен ({bytes.Length} байт): {BitConverter.ToString(bytes).Replace("-", " ")}", "OUTGOING", ConsoleColor.Green);
             }
         }
-        catch (Exception ex)
-        {
-            LogMessage($"❌ Ошибка отправки HEX данных: {ex.Message}", "ERROR", ConsoleColor.Red);
-        }
+        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
     }
 
     static void ShowConnectionStatus()
     {
         var panel = new Panel($"""
-                               Клиент: {_currentClientInfo}
-                               Статус: {(_currentClient?.Connected == true ? "[green]Подключен[/]" : "[red]Отключен[/]")}
+                               Клиент:       {_currentClientInfo}
+                               Статус:       {(_isClientConnected ? "[green]Подключен[/]" : "[red]Отключен[/]")}
                                Логгирование: {(_isReadingIncoming ? "[green]Активно[/]" : "[red]Остановлено[/]")}
-                               Поток: {(_clientStream?.CanWrite == true ? "[green]Доступен[/]" : "[red]Недоступен[/]")}
-                               Время: {DateTime.Now:HH:mm:ss}
+                               Поток:        {(_clientStream?.CanWrite == true ? "[green]Доступен[/]" : "[red]Недоступен[/]")}
+                               Время:        {DateTime.Now:HH:mm:ss}
                                """)
         {
             Header = new PanelHeader("[blue]Статус соединения[/]"),
             Border = BoxBorder.Rounded,
             Padding = new Padding(1, 1, 1, 1)
         };
-
         AnsiConsole.Write(panel);
     }
 
@@ -557,93 +448,53 @@ class Program
         {
             _readCancellationSource.Cancel();
             _isReadingIncoming = false;
-            LogMessage("⏸️ Логгирование входящих данных приостановлено", "SYSTEM", ConsoleColor.Yellow);
+            LogMessage("⏸️ Логгирование приостановлено", "SYSTEM", ConsoleColor.Yellow);
         }
-        else
-        {
-            LogMessage("Логгирование уже приостановлено", "SYSTEM", ConsoleColor.Gray);
-        }
+        else LogMessage("Логгирование уже приостановлено", "SYSTEM", ConsoleColor.Gray);
     }
 
     static void ResumeLogging()
     {
-        if (!_isReadingIncoming && _currentClient?.Connected == true)
+        if (!_isReadingIncoming && _isClientConnected)
         {
             _readCancellationSource = new CancellationTokenSource();
             _isReadingIncoming = true;
             _ = Task.Run(() => ReadIncomingDataAsync(_readCancellationSource.Token));
-            LogMessage("▶️ Логгирование входящих данных возобновлено", "SYSTEM", ConsoleColor.Green);
+            LogMessage("▶️ Логгирование возобновлено", "SYSTEM", ConsoleColor.Green);
         }
-        else
-        {
-            LogMessage("Логгирование уже активно", "SYSTEM", ConsoleColor.Gray);
-        }
+        else LogMessage("Логгирование уже активно", "SYSTEM", ConsoleColor.Gray);
     }
 
     static void ShowLogs()
     {
         try
         {
-            if (File.Exists("tcp_sender.log"))
-            {
-                var logs = File.ReadAllLines("tcp_sender.log");
-                    
-                var table = new Table();
-                table.Border(TableBorder.Rounded);
-                table.Title("[blue]📋 Последние логи[/]");
-                    
-                table.AddColumn("Время");
-                table.AddColumn("Тип");
-                table.AddColumn("Сообщение");
+            if (!File.Exists("tcp_sender.log")) { LogMessage("Файл логов не найден", "SYSTEM", ConsoleColor.Gray); return; }
 
-                // Показываем последние 20 записей
-                var startIndex = Math.Max(0, logs.Length - 20);
-                for (int i = startIndex; i < logs.Length; i++)
-                {
-                    var parts = logs[i].Split(']', 3);
-                    if (parts.Length >= 3)
-                    {
-                        var time = parts[0].TrimStart('[');
-                        var type = parts[1].TrimStart('[').Trim();
-                        var message = parts[2].Trim();
-                            
-                        table.AddRow(
-                            $"[grey]{time}[/]",
-                            $"[cyan]{type}[/]",
-                            message);
-                    }
-                }
+            var logs = File.ReadAllLines("tcp_sender.log");
+            var table = new Table();
+            table.Border(TableBorder.Rounded);
+            table.Title("[blue]📋 Последние 20 логов[/]");
+            table.AddColumn("Время"); table.AddColumn("Тип"); table.AddColumn("Сообщение");
 
-                AnsiConsole.Write(table);
-                LogMessage($"Показано {Math.Min(20, logs.Length)} из {logs.Length} записей лога", "SYSTEM", ConsoleColor.Blue);
-            }
-            else
+            foreach (var line in logs.TakeLast(20))
             {
-                LogMessage("Файл логов не найден", "SYSTEM", ConsoleColor.Gray);
+                var parts = line.Split(']', 3);
+                if (parts.Length >= 3)
+                    table.AddRow($"[grey]{parts[0].TrimStart('[')}[/]", $"[cyan]{parts[1].TrimStart('[').Trim()}[/]", parts[2].Trim());
             }
+
+            AnsiConsole.Write(table);
         }
-        catch (Exception ex)
-        {
-            LogMessage($"❌ Ошибка чтения логов: {ex.Message}", "ERROR", ConsoleColor.Red);
-        }
+        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
     }
 
     static void ClearLogs()
     {
         if (AnsiConsole.Confirm("[red]Очистить все логи?[/]", false))
         {
-            try
-            {
-                if (File.Exists("tcp_sender.log"))
-                {
-                    File.Delete("tcp_sender.log");
-                    LogMessage("🧹 Логи очищены", "SYSTEM", ConsoleColor.Green);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"❌ Ошибка очистки логов: {ex.Message}", "ERROR", ConsoleColor.Red);
-            }
+            try { if (File.Exists("tcp_sender.log")) { File.Delete("tcp_sender.log"); LogMessage("🧹 Логи очищены", "SYSTEM", ConsoleColor.Green); } }
+            catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
         }
     }
 
@@ -651,58 +502,97 @@ class Program
     {
         try
         {
-            if (_currentClient != null && _currentClient.Connected)
+            if (_currentClient is { Connected: true } && _clientStream != null)
             {
-                // Останавливаем чтение входящих данных
-                if (_isReadingIncoming)
-                {
-                    _readCancellationSource.Cancel();
-                }
-
-                // Отправляем сообщение о разрыве соединения
-                var disconnectMsg = Encoding.UTF8.GetBytes("[SERVER] Соединение закрыто\n");
-                await _clientStream.WriteAsync(disconnectMsg, 0, disconnectMsg.Length);
-                    
+                _readCancellationSource.Cancel();
+                var msg = Encoding.UTF8.GetBytes("[SERVER] Соединение закрыто\n");
+                await _clientStream.WriteAsync(msg);
                 await Task.Delay(100);
-                    
-                _clientStream?.Close();
-                _currentClient?.Close();
-                    
+                _clientStream.Close();
+                _currentClient.Close();
                 LogMessage("🔌 Соединение закрыто сервером", "SYSTEM", ConsoleColor.Yellow);
             }
         }
-        catch (Exception ex)
-        {
-            LogMessage($"❌ Ошибка при отключении: {ex.Message}", "ERROR", ConsoleColor.Red);
-        }
-        finally
-        {
-            _currentClient = null;
-            _clientStream = null;
-            _isReadingIncoming = false;
-            LogMessage("⏳ Ожидание нового подключения...", "SYSTEM", ConsoleColor.Blue);
-        }
+        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+        finally { _isClientConnected = false; }
     }
+
+    static void ShowAvailableFiles()
+    {
+        if (!Directory.Exists(_filesDirectory))
+        {
+            Directory.CreateDirectory(_filesDirectory);
+            LogMessage($"📁 Папка '{_filesDirectory}' создана", "SYSTEM", ConsoleColor.Blue);
+        }
+
+        var files = GetAvailableFiles();
+        if (files.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]В папке '{_filesDirectory}' нет файлов[/]");
+            return;
+        }
+
+        var table = new Table();
+        table.Border(TableBorder.Rounded);
+        table.Title($"[blue]📁 Файлы в '{_filesDirectory}'[/]");
+        table.AddColumn(new TableColumn("[green]#[/]").Centered());
+        table.AddColumn("[green]Имя файла[/]");
+        table.AddColumn(new TableColumn("[green]Размер[/]").RightAligned());
+        table.AddColumn("[green]Тип[/]");
+        table.AddColumn("[green]Изменён[/]");
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            var f = files[i];
+            var type = GetFileType(f.Extension.ToLower());
+            table.AddRow($"[yellow]{i + 1}[/]", f.Name, $"[cyan]{f.Length:N0}[/] байт",
+                $"[{GetFileTypeColor(type)}]{type}[/]", $"[grey]{f.LastWriteTime:dd.MM.yy HH:mm}[/]");
+        }
+
+        AnsiConsole.Write(table);
+        LogMessage($"📊 Всего файлов: {files.Count}", "SYSTEM", ConsoleColor.Blue);
+    }
+
+    static List<FileInfo> GetAvailableFiles() =>
+        Directory.Exists(_filesDirectory)
+            ? Directory.GetFiles(_filesDirectory).Select(f => new FileInfo(f)).OrderBy(f => f.Name).ToList()
+            : new List<FileInfo>();
+
+    static string GetFileType(string ext) => ext switch
+    {
+        ".txt" => "Текст", ".json" => "JSON", ".xml" => "XML", ".csv" => "CSV",
+        ".bin" => "Бинарный", ".dat" => "Данные", ".log" => "Лог",
+        ".cfg" or ".config" => "Конфиг", ".jpg" or ".jpeg" or ".png" or ".gif" => "Изображение",
+        ".pdf" => "PDF", ".zip" or ".rar" => "Архив", ".exe" => "Программа", ".dll" => "Библиотека",
+        _ => "Другой"
+    };
+
+    static string GetFileTypeColor(string type) => type switch
+    {
+        "Текст" => "green", "JSON" => "yellow", "XML" => "orange1", "CSV" => "cyan",
+        "Бинарный" => "magenta", "Данные" => "blue", "Лог" => "grey", "Конфиг" => "purple",
+        "Изображение" => "springgreen1", "PDF" => "red", "Архив" => "darkorange",
+        "Программа" => "red1", "Библиотека" => "darkcyan", _ => "white"
+    };
 
     static void LogMessage(string message, string type, ConsoleColor color)
     {
-        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-        var logEntry = $"[{timestamp}] [{type}] {message}";
-
+        var ts = DateTime.Now.ToString("HH:mm:ss.fff");
         var colorName = color.ToString().ToLower();
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape($"[{ts}] ")}[/][{colorName}]{Markup.Escape($"[{type}] ")}[/] {message}");
 
-        var escapedTimestamp = Markup.Escape($"[{timestamp}] ");
-        var escapedType = Markup.Escape($"[{type}] ");
-        AnsiConsole.MarkupLine($"[grey]{escapedTimestamp}[/][{colorName}]{escapedType}[/] {message}");
-
-        // Запись в файл лога
-        try
-        {
-            File.AppendAllText("tcp_sender.log", logEntry + Environment.NewLine, Encoding.UTF8);
-        }
-        catch
-        {
-            // Игнорируем ошибки записи в лог
-        }
+        try { File.AppendAllText("tcp_sender.log", $"[{ts}] [{type}] {message}{Environment.NewLine}", Encoding.UTF8); }
+        catch { }
     }
+
+    static bool IsPrintableText(string text)
+    {
+        foreach (char c in text)
+            if ((c < 32 && c != '\n' && c != '\r' && c != '\t') || (c > 126 && c < 160))
+                return false;
+        return true;
+    }
+
+    static string EscapeControlCharacters(string text) =>
+        text.Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t").Replace("\0", "\\0");
 }
