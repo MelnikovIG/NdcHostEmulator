@@ -18,10 +18,6 @@ class Program
 
     static async Task Main(string[] args)
     {
-        AnsiConsole.Clear();
-        AnsiConsole.Write(new FigletText("TCP File Logger").Color(Color.Blue));
-        AnsiConsole.Write(new Rule("[yellow]Логирование входящих/исходящих данных[/]").LeftJustified());
-
         // Показываем список файлов в директории
         ShowAvailableFiles();
 
