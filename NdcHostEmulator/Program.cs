@@ -185,7 +185,7 @@ class Program
                     else
                     {
                         LogMessage("HEX", $"{BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", ConsoleColor.Gray);
-                        AnsiConsole.WriteLine($"{Encoding.UTF8.GetString(buffer[..bytesRead])}");
+                        LogMessage("UTF8", $"{Encoding.UTF8.GetString(buffer[..bytesRead])}", ConsoleColor.Green);
                     }
                 }
                 else
@@ -331,9 +331,9 @@ class Program
                         totalSentBytes += byteData.Length;
 
                         LogMessage("OUTGOING", $"📤 Команда {i + 1}/{commands.Length} — {byteData.Length} байт", ConsoleColor.Green);
-                        AnsiConsole.WriteLine(Encoding.UTF8.GetString(byteData));
-                        var speed = stopwatch.Elapsed.TotalSeconds > 0 ? totalSentBytes / stopwatch.Elapsed.TotalSeconds : 0;
-                        ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
+                        LogMessage("UTF8", $"{Encoding.UTF8.GetString(byteData)}", ConsoleColor.Green);
+                        // var speed = stopwatch.Elapsed.TotalSeconds > 0 ? totalSentBytes / stopwatch.Elapsed.TotalSeconds : 0;
+                        // ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
                     }
                     else throw new Exception("Соединение разорвано");
                 }
@@ -563,10 +563,22 @@ class Program
     {
         var ts = DateTime.Now.ToString("HH:mm:ss.fff");
         var colorName = color.ToString().ToLower();
-        AnsiConsole.MarkupLine(
-            $"[grey]{Markup.Escape($"[{ts}] ")}[/][{colorName}]{Markup.Escape($"[{type}] ")}[/] {message}");
 
-        try { File.AppendAllText("tcp_sender.log", $"[{ts}] [{type}] {message}{Environment.NewLine}", Encoding.UTF8); }
+        try
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{Markup.Escape($"[{ts}] ")}[/][{colorName}]{Markup.Escape($"[{type}] ")}[/] {Markup.Escape(message)}");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
+
+        try
+        {
+            File.AppendAllText("tcp_sender.log", $"[{ts}] [{type}] {message}{Environment.NewLine}", Encoding.UTF8);
+        }
         catch { }
     }
 
