@@ -56,7 +56,7 @@ class Program
                 _clientStream = _currentClient.GetStream();
                 _isClientConnected = true;
 
-                LogMessage($"✅ Подключен: {_currentClientInfo}", "CONNECT", ConsoleColor.Green);
+                LogMessage("CONNECT", $"✅ Подключен: {_currentClientInfo}", ConsoleColor.Green);
 
                 _readCancellationSource = new CancellationTokenSource();
                 _isReadingIncoming = true;
@@ -68,7 +68,7 @@ class Program
             }
             catch (Exception ex) when (_isRunning)
             {
-                LogMessage($"❌ Ошибка сервера: {ex.Message}", "ERROR", ConsoleColor.Red);
+                LogMessage("ERROR", $"❌ Ошибка сервера: {ex.Message}", ConsoleColor.Red);
                 CleanupConnection();
             }
         }
@@ -118,7 +118,7 @@ class Program
         }
         catch (Exception ex)
         {
-            LogMessage($"⚠️ Не удалось сохранить порт: {ex.Message}", "SYSTEM", ConsoleColor.DarkYellow);
+            LogMessage("SYSTEM", $"⚠️ Не удалось сохранить порт: {ex.Message}", ConsoleColor.DarkYellow);
         }
     }
 
@@ -136,7 +136,7 @@ class Program
 
         _isClientConnected = false;
         _readCancellationSource.Cancel();
-        LogMessage($"🔌 Клиент {_currentClientInfo} отключился", "DISCONNECT", ConsoleColor.Yellow);
+        LogMessage("DISCONNECT", $"🔌 Клиент {_currentClientInfo} отключился", ConsoleColor.Yellow);
     }
 
     static void CleanupConnection()
@@ -176,14 +176,16 @@ class Program
                     }
 
                     var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    LogMessage($"📥 Входящие данные ({bytesRead} байт):", "INCOMING", ConsoleColor.Yellow);
+                    LogMessage("INCOMING", $"📥 Входящие данные ({bytesRead} байт):", ConsoleColor.Yellow);
 
                     if (IsPrintableText(data))
-                        LogMessage($"   {EscapeControlCharacters(data)}", "DATA", ConsoleColor.Gray);
+                    {
+                        LogMessage("DATA", $"   {EscapeControlCharacters(data)}", ConsoleColor.Gray);
+                    }
                     else
                     {
-                        LogMessage($"   Бинарные данные: {bytesRead} байт", "DATA", ConsoleColor.Gray);
-                        LogMessage($"   Hex: {BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", "HEX", ConsoleColor.DarkCyan);
+                        LogMessage("HEX", $"{BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", ConsoleColor.Gray);
+                        AnsiConsole.WriteLine($"{Encoding.UTF8.GetString(buffer[..bytesRead])}");
                     }
                 }
                 else
@@ -201,7 +203,7 @@ class Program
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            LogMessage($"❌ Ошибка чтения: {ex.Message}", "ERROR", ConsoleColor.Red);
+            LogMessage("ERROR", $"❌ Ошибка чтения: {ex.Message}", ConsoleColor.Red);
             await HandleClientDisconnectedAsync();
         }
         finally
@@ -244,7 +246,7 @@ class Program
 
             if (!_isClientConnected)
             {
-                LogMessage("⚠️ Соединение было разорвано клиентом", "SYSTEM", ConsoleColor.Yellow);
+                LogMessage("SYSTEM", "⚠️ Соединение было разорвано клиентом", ConsoleColor.Yellow);
                 return;
             }
 
@@ -276,7 +278,7 @@ class Program
             var files = GetAvailableFiles();
             if (files.Count == 0)
             {
-                LogMessage($"❌ В папке '{_filesDirectory}' нет файлов", "ERROR", ConsoleColor.Red);
+                LogMessage("ERROR", $"❌ В папке '{_filesDirectory}' нет файлов", ConsoleColor.Red);
                 return;
             }
 
@@ -328,7 +330,8 @@ class Program
                         _clientStream.Write(byteData);
                         totalSentBytes += byteData.Length;
 
-                        LogMessage($"📤 Команда {i + 1}/{commands.Length} — {byteData.Length} байт", "OUTGOING", ConsoleColor.Green);
+                        LogMessage("OUTGOING", $"📤 Команда {i + 1}/{commands.Length} — {byteData.Length} байт", ConsoleColor.Green);
+                        AnsiConsole.WriteLine(Encoding.UTF8.GetString(byteData));
                         var speed = stopwatch.Elapsed.TotalSeconds > 0 ? totalSentBytes / stopwatch.Elapsed.TotalSeconds : 0;
                         ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
                     }
@@ -357,7 +360,7 @@ class Program
         }
         catch (Exception ex)
         {
-            LogMessage($"❌ Ошибка отправки файла: {ex.Message}", "ERROR", ConsoleColor.Red);
+            LogMessage("ERROR", $"❌ Ошибка отправки файла: {ex.Message}", ConsoleColor.Red);
         }
     }
 
@@ -372,10 +375,10 @@ class Program
             if (_clientStream is { CanWrite: true })
             {
                 await _clientStream.WriteAsync(bytes);
-                LogMessage($"📤 Отправлен текст ({bytes.Length} байт): {EscapeControlCharacters(text)}", "OUTGOING", ConsoleColor.Green);
+                LogMessage("OUTGOING", $"📤 Отправлен текст ({bytes.Length} байт): {EscapeControlCharacters(text)}", ConsoleColor.Green);
             }
         }
-        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+        catch (Exception ex) { LogMessage("ERROR", $"❌ {ex.Message}", ConsoleColor.Red); }
     }
 
     static async Task SendHexDataAsync()
@@ -387,7 +390,7 @@ class Program
             if (string.IsNullOrEmpty(hexInput)) return;
 
             hexInput = hexInput.Replace(" ", "").Replace("-", "").Replace("0x", "");
-            if (hexInput.Length % 2 != 0) { LogMessage("❌ Неверный формат HEX", "ERROR", ConsoleColor.Red); return; }
+            if (hexInput.Length % 2 != 0) { LogMessage("ERROR", "❌ Неверный формат HEX", ConsoleColor.Red); return; }
 
             var bytes = new byte[hexInput.Length / 2];
             for (int i = 0; i < bytes.Length; i++)
@@ -396,10 +399,10 @@ class Program
             if (_clientStream is { CanWrite: true })
             {
                 await _clientStream.WriteAsync(bytes);
-                LogMessage($"📤 HEX отправлен ({bytes.Length} байт): {BitConverter.ToString(bytes).Replace("-", " ")}", "OUTGOING", ConsoleColor.Green);
+                LogMessage("OUTGOING", $"📤 HEX отправлен ({bytes.Length} байт): {BitConverter.ToString(bytes).Replace("-", " ")}", ConsoleColor.Green);
             }
         }
-        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+        catch (Exception ex) { LogMessage("ERROR", $"❌ {ex.Message}", ConsoleColor.Red); }
     }
 
     static void ShowConnectionStatus()
@@ -424,9 +427,9 @@ class Program
         {
             _readCancellationSource.Cancel();
             _isReadingIncoming = false;
-            LogMessage("⏸️ Логгирование приостановлено", "SYSTEM", ConsoleColor.Yellow);
+            LogMessage("SYSTEM", "⏸️ Логгирование приостановлено", ConsoleColor.Yellow);
         }
-        else LogMessage("Логгирование уже приостановлено", "SYSTEM", ConsoleColor.Gray);
+        else LogMessage("SYSTEM", "Логгирование уже приостановлено", ConsoleColor.Gray);
     }
 
     static void ResumeLogging()
@@ -436,36 +439,25 @@ class Program
             _readCancellationSource = new CancellationTokenSource();
             _isReadingIncoming = true;
             _ = Task.Run(() => ReadIncomingDataAsync(_readCancellationSource.Token));
-            LogMessage("▶️ Логгирование возобновлено", "SYSTEM", ConsoleColor.Green);
+            LogMessage("SYSTEM", "▶️ Логгирование возобновлено", ConsoleColor.Green);
         }
-        else LogMessage("Логгирование уже активно", "SYSTEM", ConsoleColor.Gray);
+        else LogMessage("SYSTEM", "Логгирование уже активно", ConsoleColor.Gray);
     }
 
     static void ShowLogs()
     {
         try
         {
-            if (!File.Exists("tcp_sender.log")) { LogMessage("Файл логов не найден", "SYSTEM", ConsoleColor.Gray); return; }
+            if (!File.Exists("tcp_sender.log")) { LogMessage("SYSTEM", "Файл логов не найден", ConsoleColor.Gray); return; }
 
             var logs = File.ReadAllLines("tcp_sender.log");
-            var table = new Table();
-            table.Border(TableBorder.Rounded);
-            table.Title("[blue]📋 Последние 20 логов[/]");
-            table.AddColumn("Время"); table.AddColumn("Тип"); table.AddColumn("Сообщение");
-
-            foreach (var line in logs.TakeLast(20))
+            AnsiConsole.WriteLine("Последние 20 логов");
+            foreach (var log in logs.TakeLast(20))
             {
-                var parts = line.Split(']', 3);
-                if (parts.Length >= 3)
-                    table.AddRow(
-                        $"[grey]{parts[0].TrimStart('[')}[/]",
-                        $"[cyan]{parts[1].TrimStart('[').Trim()}[/]",
-                        parts[2].Trim());
+                AnsiConsole.WriteLine(log);
             }
-
-            AnsiConsole.Write(table);
         }
-        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+        catch (Exception ex) { LogMessage("ERROR", $"❌ {ex.Message}", ConsoleColor.Red); }
     }
 
     static void ClearLogs()
@@ -477,10 +469,10 @@ class Program
                 if (File.Exists("tcp_sender.log"))
                 {
                     File.Delete("tcp_sender.log");
-                    LogMessage("🧹 Логи очищены", "SYSTEM", ConsoleColor.Green);
+                    LogMessage("SYSTEM", "🧹 Логи очищены", ConsoleColor.Green);
                 }
             }
-            catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+            catch (Exception ex) { LogMessage("ERROR", $"❌ {ex.Message}", ConsoleColor.Red); }
         }
     }
 
@@ -496,10 +488,10 @@ class Program
                 await Task.Delay(100);
                 _clientStream.Close();
                 _currentClient.Close();
-                LogMessage("🔌 Соединение закрыто сервером", "SYSTEM", ConsoleColor.Yellow);
+                LogMessage("SYSTEM", "🔌 Соединение закрыто сервером", ConsoleColor.Yellow);
             }
         }
-        catch (Exception ex) { LogMessage($"❌ {ex.Message}", "ERROR", ConsoleColor.Red); }
+        catch (Exception ex) { LogMessage("ERROR", $"❌ {ex.Message}", ConsoleColor.Red); }
         finally { _isClientConnected = false; }
     }
 
@@ -508,7 +500,7 @@ class Program
         if (!Directory.Exists(_filesDirectory))
         {
             Directory.CreateDirectory(_filesDirectory);
-            LogMessage($"📁 Папка '{_filesDirectory}' создана", "SYSTEM", ConsoleColor.Blue);
+            LogMessage("SYSTEM", $"📁 Папка '{_filesDirectory}' создана", ConsoleColor.Blue);
         }
 
         var files = GetAvailableFiles();
@@ -540,7 +532,7 @@ class Program
         }
 
         AnsiConsole.Write(table);
-        LogMessage($"📊 Всего файлов: {files.Count}", "SYSTEM", ConsoleColor.Blue);
+        LogMessage("SYSTEM", $"📊 Всего файлов: {files.Count}", ConsoleColor.Blue);
     }
 
     static List<FileInfo> GetAvailableFiles() =>
@@ -567,7 +559,7 @@ class Program
         "Программа" => "red1", "Библиотека" => "darkcyan", _ => "white"
     };
 
-    static void LogMessage(string message, string type, ConsoleColor color)
+    static void LogMessage(string type, string message, ConsoleColor color)
     {
         var ts = DateTime.Now.ToString("HH:mm:ss.fff");
         var colorName = color.ToString().ToLower();
