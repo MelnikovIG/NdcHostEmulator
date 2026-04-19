@@ -1,0 +1,49 @@
+@inject TcpServerService TcpService
+@implements IDisposable
+
+@if (TcpService.IsClientConnected)
+{
+    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.Wifi">
+        @TcpService.CurrentClientInfo
+    </MudChip>
+    <MudTooltip Text="Отключить клиента">
+        <MudIconButton Icon="@Icons.Material.Filled.WifiOff"
+                       Color="Color.Warning"
+                       Size="Size.Small"
+                       OnClick="DisconnectAsync" />
+    </MudTooltip>
+}
+else if (TcpService.IsListening)
+{
+    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Icon="@Icons.Material.Filled.WifiFind">
+        Порт @TcpService.CurrentPort — ожидание...
+    </MudChip>
+}
+else
+{
+    <MudChip T="string" Color="Color.Error" Size="Size.Small" Icon="@Icons.Material.Filled.WifiOff">
+        Сервер остановлен
+    </MudChip>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        TcpService.OnConnectionChanged += OnConnectionChanged;
+    }
+
+    private void OnConnectionChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await TcpService.DisconnectClient();
+    }
+
+    public void Dispose()
+    {
+        TcpService.OnConnectionChanged -= OnConnectionChanged;
+    }
+}

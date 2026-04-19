@@ -1,0 +1,100 @@
+@page "/"
+@inject TcpServerService TcpService
+@implements IDisposable
+
+<PageTitle>NDC Host Emulator — Dashboard</PageTitle>
+
+<MudGrid Spacing="3">
+
+    <!-- Статус сервера -->
+    <MudItem xs="12" md="4">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Сервер</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    @if (TcpService.IsListening)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Запущен</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Error" Size="Size.Small">Остановлен</MudChip>
+                    }
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudStack Spacing="1">
+                    <MudText><b>Порт:</b> @(TcpService.IsListening ? TcpService.CurrentPort.ToString() : "—")</MudText>
+                    <MudText><b>Статус клиента:</b>
+                        @if (TcpService.IsClientConnected)
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">Подключён</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">Ожидание</MudChip>
+                        }
+                    </MudText>
+                    @if (TcpService.IsClientConnected)
+                    {
+                        <MudText><b>Клиент:</b> @TcpService.CurrentClientInfo</MudText>
+                    }
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Быстрые действия -->
+    <MudItem xs="12" md="8">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Быстрые действия</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Folder"
+                               Href="files"
+                               Disabled="@(!TcpService.IsClientConnected)">
+                        Отправить файл
+                    </MudButton>
+<MudButton Variant="Variant.Outlined"
+                               Color="Color.Error"
+                               StartIcon="@Icons.Material.Filled.WifiOff"
+                               OnClick="DisconnectAsync"
+                               Disabled="@(!TcpService.IsClientConnected)">
+                        Отключить клиента
+                    </MudButton>
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+</MudGrid>
+
+@code {
+    protected override void OnInitialized()
+    {
+        TcpService.OnConnectionChanged += OnConnectionChanged;
+    }
+
+    private void OnConnectionChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await TcpService.DisconnectClient();
+    }
+
+    public void Dispose()
+    {
+        TcpService.OnConnectionChanged -= OnConnectionChanged;
+    }
+}

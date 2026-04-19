@@ -1,0 +1,219 @@
+@page "/settings"
+@inject TcpServerService TcpService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Настройки — NDC Host Emulator</PageTitle>
+
+<MudGrid Spacing="3">
+
+    <!-- Настройки сервера -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">TCP Сервер</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    @if (TcpService.IsListening)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Запущен</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Error" Size="Size.Small">Остановлен</MudChip>
+                    }
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudNumericField T="int"
+                                 @bind-Value="_port"
+                                 Label="Порт NDC"
+                                 Min="1" Max="65535"
+                                 Variant="Variant.Outlined"
+                                 HelperText="Порт на котором банкомат подключается к эмулятору" />
+
+                @if (TcpService.IsClientConnected)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                        При смене порта клиент @TcpService.CurrentClientInfo будет отключён
+                    </MudAlert>
+                }
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="ApplyPortAsync"
+                           Disabled="_isApplyingPort"
+                           StartIcon="@Icons.Material.Filled.RestartAlt">
+                    @(_isApplyingPort ? "Применяется..." : "Применить")
+                </MudButton>
+                @if (!TcpService.IsListening)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Success"
+                               OnClick="StartServerAsync"
+                               StartIcon="@Icons.Material.Filled.PlayArrow">
+                        Запустить
+                    </MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Error"
+                               OnClick="StopServerAsync"
+                               StartIcon="@Icons.Material.Filled.Stop">
+                        Остановить
+                    </MudButton>
+                }
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <!-- Директория файлов -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Директория файлов</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudChip T="string" Color="Color.Info" Size="Size.Small">@_fileCount файлов</MudChip>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField T="string"
+                              @bind-Value="_filesDirectory"
+                              Label="Путь к директории"
+                              Variant="Variant.Outlined"
+                              HelperText="Директория с NDC-файлами для отправки (.txt)" />
+
+                @if (_dirNotFound)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                        Директория не найдена: @_filesDirectory
+                    </MudAlert>
+                }
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="ApplyDirectoryAsync"
+                           StartIcon="@Icons.Material.Filled.FolderOpen">
+                    Применить
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    </MudItem>
+
+    <!-- О программе -->
+    <MudItem xs="12" md="6">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">О программе</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudStack Spacing="1">
+                    <MudText><b>NDC Host Emulator</b> — Web Edition v1.0</MudText>
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.body2">
+                        <b>NDC порт:</b> @(TcpService.IsListening ? TcpService.CurrentPort.ToString() : "—")
+                    </MudText>
+                    <MudText Typo="Typo.body2">
+                        <b>Директория файлов:</b> @TcpService.FilesDirectory
+                    </MudText>
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+</MudGrid>
+
+@code {
+    private int _port;
+    private string _filesDirectory = string.Empty;
+    private bool _isApplyingPort;
+    private bool _dirNotFound;
+    private int _fileCount;
+
+    protected override void OnInitialized()
+    {
+        TcpService.OnConnectionChanged += OnStateChanged;
+        LoadCurrentValues();
+    }
+
+    private void LoadCurrentValues()
+    {
+        _port = TcpService.CurrentPort > 0 ? TcpService.CurrentPort : 4070;
+        _filesDirectory = TcpService.FilesDirectory;
+        RefreshFileCount();
+    }
+
+    private void RefreshFileCount()
+    {
+        _dirNotFound = !Directory.Exists(_filesDirectory);
+        _fileCount = _dirNotFound ? 0 : Directory.GetFiles(_filesDirectory).Length;
+    }
+
+    private async Task ApplyPortAsync()
+    {
+        if (_port < 1 || _port > 65535) return;
+
+        _isApplyingPort = true;
+        try
+        {
+            await TcpService.StopListening();
+            await TcpService.StartListening(_port);
+            Snackbar.Add($"Сервер перезапущен на порту {_port}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Ошибка: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isApplyingPort = false;
+        }
+    }
+
+    private async Task StartServerAsync()
+    {
+        try
+        {
+            await TcpService.StartListening(_port);
+            Snackbar.Add($"Сервер запущен на порту {_port}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Ошибка: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task StopServerAsync()
+    {
+        await TcpService.StopListening();
+        Snackbar.Add("Сервер остановлен", Severity.Info);
+    }
+
+    private Task ApplyDirectoryAsync()
+    {
+        TcpService.SetFilesDirectory(_filesDirectory);
+        RefreshFileCount();
+
+        if (_dirNotFound)
+            Snackbar.Add($"Директория не найдена: {_filesDirectory}", Severity.Warning);
+        else
+            Snackbar.Add($"Директория обновлена: {_filesDirectory} ({_fileCount} файлов)", Severity.Success);
+
+        return Task.CompletedTask;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        TcpService.OnConnectionChanged -= OnStateChanged;
+    }
+}

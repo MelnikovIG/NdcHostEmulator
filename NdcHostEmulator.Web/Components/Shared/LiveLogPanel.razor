@@ -1,0 +1,115 @@
+@inject TcpServerService TcpService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div data-livelog-panel>
+    <MudPaper Elevation="4" Square="true" Style="background: #1a1a1a; border-top: 1px solid #333;">
+        <!-- Resize handle -->
+        <div id="live-log-resize-handle"
+             style="height: 5px; cursor: ns-resize; background: #2d2d2d; border-top: 1px solid #444;
+                    transition: background 0.15s;"
+             onmouseover="this.style.background='#094771'"
+             onmouseout="this.style.background='#2d2d2d'">
+        </div>
+        <!-- Header -->
+        <div style="display: flex; align-items: center; padding: 2px 12px; background: #252526; border-bottom: 1px solid #333;">
+            <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Style="color: #888; margin-right: 6px;" />
+            <MudText Typo="Typo.caption" Style="color: #ccc; flex: 1;">Live Log</MudText>
+            <MudText Typo="Typo.caption" Style="color: #666; margin-right: 8px;">@_logs.Count</MudText>
+            <MudTooltip Text="Очистить">
+                <MudIconButton Icon="@Icons.Material.Filled.ClearAll"
+                               Size="Size.Small"
+                               Style="color: #666; padding: 2px;"
+                               OnClick="() => _logs.Clear()" />
+            </MudTooltip>
+        </div>
+        <!-- Log entries -->
+        <div id="live-log-scroll"
+             style="height: 180px; overflow-y: auto; font-family: monospace; font-size: 11px; padding: 2px 0;">
+            @foreach (var entry in _logs)
+            {
+                <div style="padding: 1px 12px; color: @GetLogColor(entry.Type);">
+                    <span style="color: #555; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
+                    <span style="font-weight: bold;"> [@entry.Type]</span>
+                    <span style="color: #bbb;"> @FormatMessage(entry.Message)</span>
+                </div>
+            }
+            <div id="live-log-bottom"></div>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    private readonly List<LogEntry> _logs = new();
+
+    protected override void OnInitialized()
+    {
+        foreach (var entry in TcpService.GetRecentLogs(100))
+            _logs.Add(entry);
+
+        TcpService.OnLogEntry += OnLogEntry;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("initResizable",
+                "live-log-resize-handle",
+                "live-log-scroll",
+                ".mud-container",
+                60, 600);
+        }
+    }
+
+    private void OnLogEntry(LogEntry entry)
+    {
+        InvokeAsync(async () =>
+        {
+            _logs.Add(entry);
+            if (_logs.Count > 200)
+                _logs.RemoveAt(0);
+            StateHasChanged();
+            await JS.InvokeVoidAsync("scrollToBottom", "live-log-bottom");
+        });
+    }
+
+    private static MarkupString FormatMessage(string message)
+    {
+        var hasGlyphs = false;
+        foreach (var c in message)
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421') { hasGlyphs = true; break; }
+
+        if (!hasGlyphs)
+            return new MarkupString(System.Net.WebUtility.HtmlEncode(message));
+
+        var sb = new System.Text.StringBuilder(message.Length * 2);
+        foreach (char c in message)
+        {
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421')
+                sb.Append($"<span class=\"ctrl-pic\">{c}</span>");
+            else
+                sb.Append(c switch { '<' => "&lt;", '>' => "&gt;", '&' => "&amp;", _ => c.ToString() });
+        }
+        return new MarkupString(sb.ToString());
+    }
+
+    private static string GetLogColor(string type) => type switch
+    {
+        "CONNECT"    => "#4ec9b0",
+        "DISCONNECT" => "#ce9178",
+        "INCOMING"   => "#569cd6",
+        "DATA"       => "#9cdcfe",
+        "UTF8"       => "#b5cea8",
+        "OUTGOING"   => "#4ec9b0",
+        "HEX"        => "#808080",
+        "ERROR"      => "#f44747",
+        "SYSTEM"     => "#888888",
+        _            => "#cccccc"
+    };
+
+    public void Dispose()
+    {
+        TcpService.OnLogEntry -= OnLogEntry;
+    }
+}
