@@ -9,25 +9,30 @@
 
 <MudLayout>
     <MudMainContent Style="padding-top: 0;">
-        <MudTabs Elevation="2"
-                 Rounded="false"
-                 ApplyEffectsToContainer="true"
-                 ActivePanelIndex="_activePanelIndex"
-                 ActivePanelIndexChanged="OnTabChanged"
-                 @ref="_tabs">
-            <MudTabPanel Text="Dashboard" Icon="@Icons.Material.Filled.Dashboard" />
-            <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder" />
-            <MudTabPanel Text="Настройки" Icon="@Icons.Material.Filled.Settings" />
-        </MudTabs>
+        <div style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
 
-        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4" Style="padding-bottom: 210px;">
-            @Body
-        </MudContainer>
+            <MudTabs Elevation="2"
+                     Rounded="false"
+                     ApplyEffectsToContainer="true"
+                     ActivePanelIndex="_activePanelIndex"
+                     ActivePanelIndexChanged="OnTabChanged"
+                     @ref="_tabs">
+                <MudTabPanel Text="Dashboard" Icon="@Icons.Material.Filled.Dashboard" />
+                <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder" />
+                <MudTabPanel Text="Настройки" Icon="@Icons.Material.Filled.Settings" />
+            </MudTabs>
+
+            <div style="flex: 1; overflow: hidden;">
+                <MudContainer MaxWidth="MaxWidth.ExtraLarge"
+                              Style="height: 100%; overflow-y: auto; box-sizing: border-box; padding-top: 16px;">
+                    @Body
+                </MudContainer>
+            </div>
+
+            <LiveLogPanel />
+
+        </div>
     </MudMainContent>
-
-    <div style="position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;">
-        <LiveLogPanel />
-    </div>
 </MudLayout>
 
 <div id="blazor-error-ui" data-nosnippet>

@@ -21,7 +21,7 @@ window.scrollToBottom = function (elementId) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'end' });
 };
 
-window.initResizable = function (handleId, scrollId, paddingTargetSelector, minHeight, maxHeight) {
+window.initResizable = function (handleId, scrollId, minHeight, maxHeight) {
     const handle = document.getElementById(handleId);
     const scroll = document.getElementById(scrollId);
     if (!handle || !scroll) return;
@@ -36,15 +36,9 @@ window.initResizable = function (handleId, scrollId, paddingTargetSelector, minH
         document.body.style.cursor = 'ns-resize';
 
         function onMove(e) {
-            const delta = startY - e.clientY; // drag up = increase height
+            const delta = startY - e.clientY;
             const newHeight = Math.min(maxHeight, Math.max(minHeight, startHeight + delta));
             scroll.style.height = newHeight + 'px';
-
-            // keep padding-bottom in sync so content isn't hidden under panel
-            const panel = handle.closest('[data-livelog-panel]');
-            const totalPanelHeight = panel ? panel.offsetHeight : newHeight + 28;
-            const target = document.querySelector(paddingTargetSelector);
-            if (target) target.style.paddingBottom = (totalPanelHeight + 8) + 'px';
         }
 
         function onUp() {

@@ -4,6 +4,8 @@
 
 <PageTitle>FileSender — NDC Host Emulator</PageTitle>
 
+<div style="display: flex; flex-direction: column; height: 100%;">
+
 @if (!TcpService.IsClientConnected)
 {
     <MudAlert Severity="Severity.Warning" Class="mb-3">
@@ -11,10 +13,11 @@
     </MudAlert>
 }
 
-<MudGrid Spacing="3">
+<div style="flex: 1; overflow: hidden;">
+<MudGrid Spacing="3" Style="height: 100%;">
     <!-- Таблица файлов -->
-    <MudItem xs="12" md="4">
-        <MudCard Elevation="2">
+    <MudItem xs="12" md="4" Style="height: 100%;">
+        <MudCard Elevation="2" Style="height: 100%; display: flex; flex-direction: column;">
             <MudCardHeader>
                 <CardHeaderContent>
                     <MudText Typo="Typo.h6">Файлы для отправки</MudText>
@@ -27,7 +30,7 @@
                     </MudTooltip>
                 </CardHeaderActions>
             </MudCardHeader>
-            <MudCardContent Class="pa-0">
+            <MudCardContent Class="pa-0" Style="flex: 1; overflow-y: auto; min-height: 0;">
                 @if (_files.Count == 0)
                 {
                     <MudAlert Severity="Severity.Info" Class="ma-3">
@@ -56,14 +59,14 @@
     </MudItem>
 
     <!-- Панель предпросмотра и отправки -->
-    <MudItem xs="12" md="8">
+    <MudItem xs="12" md="8" Style="height: 100%;">
         @if (_selectedFile == null)
         {
             <MudAlert Severity="Severity.Info">Выберите файл из списка</MudAlert>
         }
         else
         {
-            <MudCard Elevation="2">
+            <MudCard Elevation="2" Style="height: 100%; display: flex; flex-direction: column;">
                 <MudCardHeader>
                     <CardHeaderContent>
                         <MudText Typo="Typo.h6">@_selectedFile.Name</MudText>
@@ -88,10 +91,10 @@
                         </MudButton>
                     </CardHeaderActions>
                 </MudCardHeader>
-                <MudCardContent Class="pa-0">
-                    <pre style="margin: 0; padding: 10px 12px; font-family: monospace; font-size: 11px;
-                                background: #1e1e1e; color: #ccc; overflow: auto; max-height: 420px;
-                                white-space: pre-wrap; word-break: break-all;">@FormatPreview(_preview)</pre>
+                <MudCardContent Class="pa-0" Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+                    <pre style="flex: 1; margin: 0; padding: 10px 12px; font-family: monospace; font-size: 11px;
+                                background: #1e1e1e; color: #ccc; overflow: auto;
+                                white-space: pre-wrap; word-break: break-all; min-height: 0;">@FormatPreview(_preview)</pre>
                 </MudCardContent>
             </MudCard>
 
@@ -104,6 +107,8 @@
         }
     </MudItem>
 </MudGrid>
+</div>
+</div>
 
 @code {
     private sealed record FileItem(string Name, string FullPath, long SizeBytes, DateTime LastModified)
