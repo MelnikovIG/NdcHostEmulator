@@ -22,8 +22,9 @@ public sealed class TcpServerService : BackgroundService
 {
     private const int MaxLogEntries = 500;
     private const int PollDelayMs = 100;
+    private const int DefaultPort = 4070;
+    private const string DefaultFilesDirectory = "./Files";
 
-    private readonly IConfiguration _configuration;
     private readonly ILogger<TcpServerService> _logger;
     private readonly object _lock = new();
 
@@ -35,7 +36,7 @@ public sealed class TcpServerService : BackgroundService
     private CancellationTokenSource? _readCancellationSource;
     private CancellationTokenSource? _listenerCancellationSource;
 
-    private string _filesDirectory = "./Files";
+    private string _filesDirectory = DefaultFilesDirectory;
 
     /// <summary>
     /// Indicates whether the TCP listener is currently active and accepting connections.
@@ -75,11 +76,9 @@ public sealed class TcpServerService : BackgroundService
     /// <summary>
     /// Initializes a new instance of <see cref="TcpServerService"/>.
     /// </summary>
-    /// <param name="configuration">Application configuration for reading TcpServer settings.</param>
     /// <param name="logger">Logger instance.</param>
-    public TcpServerService(IConfiguration configuration, ILogger<TcpServerService> logger)
+    public TcpServerService(ILogger<TcpServerService> logger)
     {
-        _configuration = configuration;
         _logger = logger;
     }
 
@@ -109,8 +108,6 @@ public sealed class TcpServerService : BackgroundService
 
         await StopListening();
 
-        _filesDirectory = _configuration["TcpServer:FilesDirectory"] ?? "./Files";
-
         if (!Directory.Exists(_filesDirectory))
             Directory.CreateDirectory(_filesDirectory);
 
@@ -122,7 +119,7 @@ public sealed class TcpServerService : BackgroundService
         CurrentPort = port;
         IsListening = true;
 
-        SaveLastPort(port);
+        SaveSettings();
         AddLog("SYSTEM", $"Server started on port {port}");
         OnConnectionChanged?.Invoke();
 
@@ -168,6 +165,7 @@ public sealed class TcpServerService : BackgroundService
         _filesDirectory = path;
         if (!Directory.Exists(path))
             Directory.CreateDirectory(path);
+        SaveSettings();
         AddLog("SYSTEM", $"Files directory changed to: {path}");
     }
 
@@ -236,7 +234,7 @@ public sealed class TcpServerService : BackgroundService
             }
 
             AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
-            AddLog("UTF8", Encoding.UTF8.GetString(byteData));
+            AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(byteData)));
         }
 
         var fileName = Path.GetFileName(filePath);
@@ -266,7 +264,7 @@ public sealed class TcpServerService : BackgroundService
             }
         }
 
-        AddLog("OUTGOING", $"Text sent ({bytes.Length} bytes): {EscapeControlCharacters(text)}");
+        AddLog("OUTGOING", $"Text sent ({bytes.Length} bytes): {FormatWithNamedChars(text)}");
         await Task.CompletedTask;
     }
 
@@ -306,9 +304,8 @@ public sealed class TcpServerService : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var configPort = _configuration.GetValue<int>("TcpServer:Port", 4070);
-        var savedPort = LoadLastPort();
-        var port = savedPort != 0 ? savedPort : configPort;
+        var (port, filesDirectory) = LoadSettings();
+        _filesDirectory = filesDirectory;
 
         await StartListening(port);
 
@@ -392,19 +389,10 @@ public sealed class TcpServerService : BackgroundService
                         HandleClientDisconnected();
                         break;
                     }
-
+                    
                     var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
                     AddLog("INCOMING", $"Incoming data ({bytesRead} bytes):");
-
-                    if (IsPrintableText(data))
-                    {
-                        AddLog("DATA", $"   {EscapeControlCharacters(data)}");
-                    }
-                    else
-                    {
-                        AddLog("HEX", BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " "));
-                        AddLog("UTF8", Encoding.UTF8.GetString(buffer, 0, bytesRead));
-                    }
+                    AddLog("DATA", FormatWithNamedChars(data));
                 }
                 else
                 {
@@ -510,51 +498,61 @@ public sealed class TcpServerService : BackgroundService
         }
     }
 
-    private static int LoadLastPort()
+    private static (int port, string filesDirectory) LoadSettings()
     {
+        var port = DefaultPort;
+        var filesDirectory = DefaultFilesDirectory;
+
         try
         {
             var statePath = Path.Combine(AppContext.BaseDirectory, "state.json");
             if (!File.Exists(statePath))
-                return 0;
+                return (port, filesDirectory);
 
             var json = File.ReadAllText(statePath);
             var doc = JsonDocument.Parse(json);
 
             if (doc.RootElement.TryGetProperty("LastPort", out var portProp) &&
-                portProp.TryGetInt32(out var port))
-                return port;
+                portProp.TryGetInt32(out var savedPort) &&
+                savedPort is > 0 and <= 65535)
+            {
+                port = savedPort;
+            }
+
+            if (doc.RootElement.TryGetProperty("FilesDirectory", out var dirProp) &&
+                dirProp.ValueKind == JsonValueKind.String)
+            {
+                var savedDir = dirProp.GetString();
+                if (!string.IsNullOrWhiteSpace(savedDir))
+                    filesDirectory = savedDir;
+            }
         }
         catch
         {
-            // Ignore
+            // Ignore and fall back to defaults
         }
 
-        return 0;
+        return (port, filesDirectory);
     }
 
-    private void SaveLastPort(int port)
+    private void SaveSettings()
     {
         try
         {
             var statePath = Path.Combine(AppContext.BaseDirectory, "state.json");
 
-            var dict = new Dictionary<string, object>();
-            if (File.Exists(statePath))
+            var state = new
             {
-                var existing = JsonDocument.Parse(File.ReadAllText(statePath));
-                dict = existing.RootElement.EnumerateObject()
-                    .ToDictionary(p => p.Name, p => (object)p.Value.ToString()!);
-            }
-
-            dict["LastPort"] = port;
+                LastPort = CurrentPort,
+                FilesDirectory = _filesDirectory
+            };
 
             File.WriteAllText(statePath,
-                JsonSerializer.Serialize(dict, new JsonSerializerOptions { WriteIndented = true }));
+                JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to save last port to state.json");
+            _logger.LogWarning(ex, "Failed to save settings to state.json");
         }
     }
 
@@ -569,6 +567,20 @@ public sealed class TcpServerService : BackgroundService
         return true;
     }
 
-    private static string EscapeControlCharacters(string text) =>
-        text.Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t").Replace("\0", "\\0");
+    // Maps control chars to Unicode Control Pictures (U+2400–U+241F, U+2421)
+    // so they render as single visible glyphs; JS copy handler restores original bytes.
+    private static string FormatWithNamedChars(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (c < 0x20)
+                sb.Append((char)(0x2400 + c)); // ␀ ␁ ␂ … ␟
+            else if (c == 0x7F)
+                sb.Append('\u2421');            // ␡
+            else
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
 }

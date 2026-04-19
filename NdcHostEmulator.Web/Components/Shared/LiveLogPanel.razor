@@ -31,7 +31,7 @@
                 <div style="padding: 1px 12px; color: @GetLogColor(entry.Type);">
                     <span style="color: #555; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
                     <span style="font-weight: bold;"> [@entry.Type]</span>
-                    <span style="color: #bbb;"> @entry.Message</span>
+                    <span style="color: #bbb;"> @FormatMessage(entry.Message)</span>
                 </div>
             }
             <div id="live-log-bottom"></div>
@@ -72,6 +72,26 @@
             StateHasChanged();
             await JS.InvokeVoidAsync("scrollToBottom", "live-log-bottom");
         });
+    }
+
+    private static MarkupString FormatMessage(string message)
+    {
+        var hasGlyphs = false;
+        foreach (var c in message)
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421') { hasGlyphs = true; break; }
+
+        if (!hasGlyphs)
+            return new MarkupString(System.Net.WebUtility.HtmlEncode(message));
+
+        var sb = new System.Text.StringBuilder(message.Length * 2);
+        foreach (char c in message)
+        {
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421')
+                sb.Append($"<span class=\"ctrl-pic\">{c}</span>");
+            else
+                sb.Append(c switch { '<' => "&lt;", '>' => "&gt;", '&' => "&amp;", _ => c.ToString() });
+        }
+        return new MarkupString(sb.ToString());
     }
 
     private static string GetLogColor(string type) => type switch

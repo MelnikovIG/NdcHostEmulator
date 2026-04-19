@@ -18,3 +18,9 @@
     right: 0.75rem;
     top: 0.5rem;
 }
+
+.ctrl-pic {
+    color: #ffc66d;
+    font-size: 1em;
+    vertical-align: baseline;
+}

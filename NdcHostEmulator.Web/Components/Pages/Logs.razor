@@ -55,7 +55,7 @@
             <div style="padding: 2px 12px; border-bottom: 1px solid #2a2a2a;">
                 <span style="color: #666; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
                 <span style="font-weight: bold; color: @GetLogColor(entry.Type);"> [@entry.Type]</span>
-                <span style="color: #cccccc;"> @entry.Message</span>
+                <span style="color: #cccccc;"> @FormatMessage(entry.Message)</span>
             </div>
         }
         <div id="log-bottom"></div>
@@ -126,6 +126,26 @@
     {
         _logs.Clear();
         _showClearDialog = false;
+    }
+
+    private static MarkupString FormatMessage(string message)
+    {
+        var hasGlyphs = false;
+        foreach (var c in message)
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421') { hasGlyphs = true; break; }
+
+        if (!hasGlyphs)
+            return new MarkupString(System.Net.WebUtility.HtmlEncode(message));
+
+        var sb = new System.Text.StringBuilder(message.Length * 2);
+        foreach (char c in message)
+        {
+            if ((c >= '\u2400' && c <= '\u241F') || c == '\u2421')
+                sb.Append($"<span class=\"ctrl-pic\">{c}</span>");
+            else
+                sb.Append(c switch { '<' => "&lt;", '>' => "&gt;", '&' => "&amp;", _ => c.ToString() });
+        }
+        return new MarkupString(sb.ToString());
     }
 
     private static string GetLogColor(string type) => type switch

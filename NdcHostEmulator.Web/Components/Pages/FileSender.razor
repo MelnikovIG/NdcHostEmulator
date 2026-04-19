@@ -13,7 +13,7 @@
 
 <MudGrid Spacing="3">
     <!-- Таблица файлов -->
-    <MudItem xs="12" md="7">
+    <MudItem xs="12" md="4">
         <MudCard Elevation="2">
             <MudCardHeader>
                 <CardHeaderContent>
@@ -56,7 +56,7 @@
     </MudItem>
 
     <!-- Панель предпросмотра и отправки -->
-    <MudItem xs="12" md="5">
+    <MudItem xs="12" md="8">
         @if (_selectedFile == null)
         {
             <MudAlert Severity="Severity.Info">Выберите файл из списка</MudAlert>
@@ -69,34 +69,30 @@
                         <MudText Typo="Typo.h6">@_selectedFile.Name</MudText>
                         <MudText Typo="Typo.body2" Color="Color.Secondary">@_selectedFile.SizeFormatted</MudText>
                     </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Send"
+                                   OnClick="SendSelectedFile"
+                                   Disabled="@(!TcpService.IsClientConnected || _isSending)"
+                                   Size="Size.Small">
+                            @if (_isSending)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <span>Отправка...</span>
+                            }
+                            else
+                            {
+                                <span>Отправить</span>
+                            }
+                        </MudButton>
+                    </CardHeaderActions>
                 </MudCardHeader>
-                <MudCardContent>
-                    <MudTextField T="string"
-                                  Value="_preview"
-                                  ReadOnly="true"
-                                  Lines="8"
-                                  Variant="Variant.Outlined"
-                                  Label="Превью содержимого"
-                                  Style="font-family: monospace; font-size: 11px;" />
+                <MudCardContent Class="pa-0">
+                    <pre style="margin: 0; padding: 10px 12px; font-family: monospace; font-size: 11px;
+                                background: #1e1e1e; color: #ccc; overflow: auto; max-height: 420px;
+                                white-space: pre-wrap; word-break: break-all;">@FormatPreview(_preview)</pre>
                 </MudCardContent>
-                <MudCardActions>
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Send"
-                               OnClick="SendSelectedFile"
-                               Disabled="@(!TcpService.IsClientConnected || _isSending)"
-                               FullWidth="true">
-                        @if (_isSending)
-                        {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                            <span>Отправка...</span>
-                        }
-                        else
-                        {
-                            <span>Отправить</span>
-                        }
-                    </MudButton>
-                </MudCardActions>
             </MudCard>
 
             @if (_sendResult != null)
@@ -167,15 +163,27 @@
 
         try
         {
-            var content = await File.ReadAllTextAsync(file.FullPath);
-            _preview = content.Length > 500
-                ? content[..500] + "\n... (обрезано)"
-                : content;
+            _preview = await File.ReadAllTextAsync(file.FullPath);
         }
         catch (Exception ex)
         {
             _preview = $"Ошибка чтения: {ex.Message}";
         }
+    }
+
+    private static MarkupString FormatPreview(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length * 2);
+        foreach (char c in text)
+        {
+            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t')
+                sb.Append($"<span class=\"ctrl-pic\">{(char)(0x2400 + c)}</span>");
+            else if (c == 0x7F)
+                sb.Append("<span class=\"ctrl-pic\">\u2421</span>");
+            else
+                sb.Append(c switch { '<' => "&lt;", '>' => "&gt;", '&' => "&amp;", _ => c.ToString() });
+        }
+        return new MarkupString(sb.ToString());
     }
 
     private string GetRowClass(FileItem item, int _)

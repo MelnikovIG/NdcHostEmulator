@@ -1,3 +1,21 @@
+// Convert Unicode Control Pictures back to original control bytes on copy
+document.addEventListener('copy', function (e) {
+    const selection = window.getSelection().toString();
+    if (!selection) return;
+    let raw = '';
+    for (let i = 0; i < selection.length; i++) {
+        const code = selection.charCodeAt(i);
+        if (code >= 0x2400 && code <= 0x241F)
+            raw += String.fromCharCode(code - 0x2400);
+        else if (code === 0x2421)
+            raw += String.fromCharCode(0x7F);
+        else
+            raw += selection[i];
+    }
+    e.clipboardData.setData('text/plain', raw);
+    e.preventDefault();
+});
+
 window.scrollToBottom = function (elementId) {
     const el = document.getElementById(elementId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'end' });
