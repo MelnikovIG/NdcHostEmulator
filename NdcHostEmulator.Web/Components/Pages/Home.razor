@@ -1,0 +1,165 @@
+@page "/"
+@inject TcpServerService TcpService
+@implements IDisposable
+
+<PageTitle>NDC Host Emulator — Dashboard</PageTitle>
+
+<MudGrid Spacing="3">
+
+    <!-- Статус сервера -->
+    <MudItem xs="12" md="4">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Сервер</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    @if (TcpService.IsListening)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Запущен</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Error" Size="Size.Small">Остановлен</MudChip>
+                    }
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudStack Spacing="1">
+                    <MudText><b>Порт:</b> @(TcpService.IsListening ? TcpService.CurrentPort.ToString() : "—")</MudText>
+                    <MudText><b>Статус клиента:</b>
+                        @if (TcpService.IsClientConnected)
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">Подключён</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">Ожидание</MudChip>
+                        }
+                    </MudText>
+                    @if (TcpService.IsClientConnected)
+                    {
+                        <MudText><b>Клиент:</b> @TcpService.CurrentClientInfo</MudText>
+                    }
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Быстрые действия -->
+    <MudItem xs="12" md="8">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Быстрые действия</MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Folder"
+                               Href="files"
+                               Disabled="@(!TcpService.IsClientConnected)">
+                        Отправить файл
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Secondary"
+                               StartIcon="@Icons.Material.Filled.Send"
+                               Href="send"
+                               Disabled="@(!TcpService.IsClientConnected)">
+                        Ручная отправка
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Error"
+                               StartIcon="@Icons.Material.Filled.WifiOff"
+                               OnClick="DisconnectAsync"
+                               Disabled="@(!TcpService.IsClientConnected)">
+                        Отключить клиента
+                    </MudButton>
+                </MudStack>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+    <!-- Live Log -->
+    <MudItem xs="12">
+        <MudCard Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">Live Log</MudText>
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@_logs.Count записей</MudChip>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent Class="pa-0">
+                <div style="height: 400px; overflow-y: auto; background: #1e1e1e; font-family: monospace; font-size: 12px;"
+                     @ref="_logContainer">
+                    @foreach (var entry in _logs)
+                    {
+                        <div style="padding: 2px 12px; border-bottom: 1px solid #2a2a2a; color: @GetLogColor(entry.Type)">
+                            <span style="color: #666; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
+                            <span style="font-weight: bold;"> [@entry.Type]</span>
+                            <span> @entry.Message</span>
+                        </div>
+                    }
+                </div>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+
+</MudGrid>
+
+@code {
+    private List<LogEntry> _logs = new();
+    private ElementReference _logContainer;
+
+    protected override void OnInitialized()
+    {
+        _logs = TcpService.GetRecentLogs(100).ToList();
+        TcpService.OnLogEntry += OnLogEntry;
+        TcpService.OnConnectionChanged += OnConnectionChanged;
+    }
+
+    private void OnLogEntry(LogEntry entry)
+    {
+        InvokeAsync(() =>
+        {
+            _logs.Add(entry);
+            if (_logs.Count > 200)
+                _logs.RemoveAt(0);
+            StateHasChanged();
+        });
+    }
+
+    private void OnConnectionChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DisconnectAsync()
+    {
+        await TcpService.DisconnectClient();
+    }
+
+    private static string GetLogColor(string type) => type switch
+    {
+        "CONNECT"    => "#4ec9b0",
+        "DISCONNECT" => "#ce9178",
+        "INCOMING"   => "#569cd6",
+        "DATA"       => "#9cdcfe",
+        "OUTGOING"   => "#4ec9b0",
+        "UTF8"       => "#b5cea8",
+        "HEX"        => "#808080",
+        "ERROR"      => "#f44747",
+        "SYSTEM"     => "#888888",
+        _            => "#cccccc"
+    };
+
+    public void Dispose()
+    {
+        TcpService.OnLogEntry -= OnLogEntry;
+        TcpService.OnConnectionChanged -= OnConnectionChanged;
+    }
+}
