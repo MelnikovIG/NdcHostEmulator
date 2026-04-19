@@ -63,14 +63,7 @@
                                Disabled="@(!TcpService.IsClientConnected)">
                         Отправить файл
                     </MudButton>
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Secondary"
-                               StartIcon="@Icons.Material.Filled.Send"
-                               Href="send"
-                               Disabled="@(!TcpService.IsClientConnected)">
-                        Ручная отправка
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined"
+<MudButton Variant="Variant.Outlined"
                                Color="Color.Error"
                                StartIcon="@Icons.Material.Filled.WifiOff"
                                OnClick="DisconnectAsync"
@@ -82,55 +75,12 @@
         </MudCard>
     </MudItem>
 
-    <!-- Live Log -->
-    <MudItem xs="12">
-        <MudCard Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">Live Log</MudText>
-                </CardHeaderContent>
-                <CardHeaderActions>
-                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@_logs.Count записей</MudChip>
-                </CardHeaderActions>
-            </MudCardHeader>
-            <MudCardContent Class="pa-0">
-                <div style="height: 400px; overflow-y: auto; background: #1e1e1e; font-family: monospace; font-size: 12px;"
-                     @ref="_logContainer">
-                    @foreach (var entry in _logs)
-                    {
-                        <div style="padding: 2px 12px; border-bottom: 1px solid #2a2a2a; color: @GetLogColor(entry.Type)">
-                            <span style="color: #666; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
-                            <span style="font-weight: bold;"> [@entry.Type]</span>
-                            <span> @entry.Message</span>
-                        </div>
-                    }
-                </div>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-
 </MudGrid>
 
 @code {
-    private List<LogEntry> _logs = new();
-    private ElementReference _logContainer;
-
     protected override void OnInitialized()
     {
-        _logs = TcpService.GetRecentLogs(100).ToList();
-        TcpService.OnLogEntry += OnLogEntry;
         TcpService.OnConnectionChanged += OnConnectionChanged;
-    }
-
-    private void OnLogEntry(LogEntry entry)
-    {
-        InvokeAsync(() =>
-        {
-            _logs.Add(entry);
-            if (_logs.Count > 200)
-                _logs.RemoveAt(0);
-            StateHasChanged();
-        });
     }
 
     private void OnConnectionChanged()
@@ -143,23 +93,8 @@
         await TcpService.DisconnectClient();
     }
 
-    private static string GetLogColor(string type) => type switch
-    {
-        "CONNECT"    => "#4ec9b0",
-        "DISCONNECT" => "#ce9178",
-        "INCOMING"   => "#569cd6",
-        "DATA"       => "#9cdcfe",
-        "OUTGOING"   => "#4ec9b0",
-        "UTF8"       => "#b5cea8",
-        "HEX"        => "#808080",
-        "ERROR"      => "#f44747",
-        "SYSTEM"     => "#888888",
-        _            => "#cccccc"
-    };
-
     public void Dispose()
     {
-        TcpService.OnLogEntry -= OnLogEntry;
         TcpService.OnConnectionChanged -= OnConnectionChanged;
     }
 }

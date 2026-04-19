@@ -498,7 +498,7 @@ public sealed class TcpServerService : BackgroundService
             _logBuffer.Add(entry);
         }
 
-        _logger.LogInformation("[{Type}] {Message}", type, message);
+        _logger.LogInformation("[{Type}]    {Message}", type, message);
 
         try
         {

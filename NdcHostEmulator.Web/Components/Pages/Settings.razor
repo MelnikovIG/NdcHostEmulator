@@ -122,9 +122,6 @@
                         <b>NDC порт:</b> @(TcpService.IsListening ? TcpService.CurrentPort.ToString() : "—")
                     </MudText>
                     <MudText Typo="Typo.body2">
-                        <b>Web UI:</b> http://localhost:5000
-                    </MudText>
-                    <MudText Typo="Typo.body2">
                         <b>Директория файлов:</b> @TcpService.FilesDirectory
                     </MudText>
                 </MudStack>

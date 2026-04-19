@@ -1,4 +1,6 @@
 @inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+@implements IDisposable
 
 <MudThemeProvider />
 <MudPopoverProvider />
@@ -6,24 +8,26 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1" Color="Color.Dark">
-        <MudText Typo="Typo.h6" Class="ml-3">NDC Host Emulator</MudText>
-        <MudSpacer />
-        <ConnectionStatusBar />
-    </MudAppBar>
+    <MudMainContent Style="padding-top: 0;">
+        <MudTabs Elevation="2"
+                 Rounded="false"
+                 ApplyEffectsToContainer="true"
+                 ActivePanelIndex="_activePanelIndex"
+                 ActivePanelIndexChanged="OnTabChanged"
+                 @ref="_tabs">
+            <MudTabPanel Text="Dashboard" Icon="@Icons.Material.Filled.Dashboard" />
+            <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder" />
+            <MudTabPanel Text="Настройки" Icon="@Icons.Material.Filled.Settings" />
+        </MudTabs>
 
-    <MudDrawer Open="true" Variant="DrawerVariant.Persistent" Elevation="2">
-        <MudDrawerHeader>
-            <MudText Typo="Typo.subtitle2" Class="mt-1">Навигация</MudText>
-        </MudDrawerHeader>
-        <NavMenu />
-    </MudDrawer>
-
-    <MudMainContent>
-        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4" Style="padding-bottom: 210px;">
             @Body
         </MudContainer>
     </MudMainContent>
+
+    <div style="position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;">
+        <LiveLogPanel />
+    </div>
 </MudLayout>
 
 <div id="blazor-error-ui" data-nosnippet>
@@ -31,3 +35,65 @@
     <a href="." class="reload">Перезагрузить</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private static readonly string[] TabUrls = ["/", "/files", "/settings"];
+
+    private MudTabs? _tabs;
+    private int _activePanelIndex;
+    private bool _navigating;
+
+    protected override void OnInitialized()
+    {
+        _activePanelIndex = GetTabIndexFromUrl();
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        var idx = GetTabIndexFromUrl();
+        if (idx != _activePanelIndex)
+        {
+            _activePanelIndex = idx;
+            _navigating = true;
+            if (_tabs is not null)
+            {
+                InvokeAsync(async () =>
+                {
+                    await _tabs.ActivatePanelAsync(idx);
+                    _navigating = false;
+                    StateHasChanged();
+                });
+            }
+            else
+            {
+                _navigating = false;
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private int GetTabIndexFromUrl()
+    {
+        var path = new Uri(NavigationManager.Uri).AbsolutePath.TrimEnd('/');
+        if (string.IsNullOrEmpty(path)) path = "/";
+
+        var idx = Array.FindIndex(TabUrls, u => u == path);
+        return idx >= 0 ? idx : 0;
+    }
+
+    private void OnTabChanged(int index)
+    {
+        if (_navigating) return;
+        if (index >= 0 && index < TabUrls.Length && index != _activePanelIndex)
+        {
+            _activePanelIndex = index;
+            NavigationManager.NavigateTo(TabUrls[index]);
+        }
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}
