@@ -27,7 +27,12 @@ try
         .AddInteractiveServerComponents();
 
     builder.Services.AddMudServices();
-    builder.Services.AddSignalR();
+    builder.Services.AddSignalR(options =>
+    {
+        options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10 MB
+        options.ClientTimeoutInterval = TimeSpan.FromMinutes(3);
+        options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+    });
 
     builder.Services.AddSingleton<TcpServerService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TcpServerService>());

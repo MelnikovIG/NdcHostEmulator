@@ -175,17 +175,12 @@ class Program
                         break;
                     }
 
-                    var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    LogMessage("INCOMING", $"📥 Входящие данные ({bytesRead} байт):", ConsoleColor.Yellow);
-
-                    if (IsPrintableText(data))
+                    var messages = ParseMessages(buffer, bytesRead);
+                    LogMessage("INCOMING", $"📥 Входящие TCP данные ({bytesRead} байт, {messages.Count} сообщ.):", ConsoleColor.Blue);
+                    foreach (var msg in messages)
                     {
-                        LogMessage("DATA", $"   {EscapeControlCharacters(data)}", ConsoleColor.Gray);
-                    }
-                    else
-                    {
-                        LogMessage("HEX", $"{BitConverter.ToString(buffer, 0, bytesRead).Replace("-", " ")}", ConsoleColor.Gray);
-                        LogMessage("UTF8", $"{Encoding.UTF8.GetString(buffer[..bytesRead])}", ConsoleColor.Green);
+                        var msgText = Encoding.UTF8.GetString(msg);
+                        LogMessage("DATA", $"{EscapeControlCharacters(msgText)}", ConsoleColor.Blue);
                     }
                 }
                 else
@@ -226,7 +221,6 @@ class Program
     {
         while (_isRunning && _isClientConnected)
         {
-            AnsiConsole.WriteLine();
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[green]Выберите действие:[/]")
@@ -296,19 +290,7 @@ class Program
             if (selected == "❌ Отмена") return;
 
             var selectedFile = files[fileChoices.IndexOf(selected)];
-
-            AnsiConsole.Write(new Panel($"""
-                [bold]Имя файла:[/] {selectedFile.Name}
-                [bold]Размер:[/]    {selectedFile.Length:N0} байт
-                [bold]Тип:[/]       {GetFileType(selectedFile.Extension.ToLower())}
-                [bold]Изменён:[/]   {selectedFile.LastWriteTime:dd.MM.yyyy HH:mm:ss}
-                """)
-            {
-                Header = new PanelHeader("[blue]Информация о файле[/]"),
-                Border = BoxBorder.Rounded,
-                Padding = new Padding(1, 1, 1, 1)
-            });
-
+            
             var fileData = await File.ReadAllTextAsync(selectedFile.FullName);
             var commands = fileData.Split("[FIELD]").Where(x => x.Length > 0).ToArray();
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -331,32 +313,16 @@ class Program
                         totalSentBytes += byteData.Length;
 
                         LogMessage("OUTGOING", $"📤 Команда {i + 1}/{commands.Length} — {byteData.Length} байт", ConsoleColor.Green);
-                        LogMessage("UTF8", $"{Encoding.UTF8.GetString(byteData)}", ConsoleColor.Green);
-                        // var speed = stopwatch.Elapsed.TotalSeconds > 0 ? totalSentBytes / stopwatch.Elapsed.TotalSeconds : 0;
-                        // ctx.Status($"Отправлено: {totalSentBytes:N0} байт ({speed:N0} байт/сек)");
+                        LogMessage("DATA", $"{EscapeControlCharacters(Encoding.UTF8.GetString(byteData))}", ConsoleColor.Green);
                     }
-                    else throw new Exception("Соединение разорвано");
+                    else
+                    {
+                        throw new Exception("Соединение разорвано");
+                    }
                 }
             });
 
             stopwatch.Stop();
-            var elapsed = stopwatch.Elapsed.TotalSeconds;
-            var finalSpeed = elapsed > 0 ? totalSentBytes / elapsed : 0;
-
-            AnsiConsole.Write(new Panel($"""
-                [green]✓ Файл успешно отправлен![/]
-
-                [bold]Имя файла:[/] {selectedFile.Name}
-                [bold]Размер:[/]    {totalSentBytes:N0} байт
-                [bold]Время:[/]     {elapsed:F2} сек
-                [bold]Скорость:[/]  {finalSpeed:N0} байт/сек
-                [bold]Клиент:[/]    {_currentClientInfo}
-                """)
-            {
-                Border = BoxBorder.Rounded,
-                BorderStyle = new Style(Color.Green),
-                Padding = new Padding(1, 1, 1, 1)
-            });
         }
         catch (Exception ex)
         {
@@ -590,6 +556,35 @@ class Program
         return true;
     }
 
-    static string EscapeControlCharacters(string text) =>
-        text.Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t").Replace("\0", "\\0");
+    static List<byte[]> ParseMessages(byte[] buffer, int count)
+    {
+        var result = new List<byte[]>();
+        int pos = 0;
+        while (pos + 2 <= count)
+        {
+            int msgLen = buffer[pos] * 256 + buffer[pos + 1];
+            pos += 2;
+            if (msgLen <= 0 || pos + msgLen > count) break;
+            result.Add(buffer[pos..(pos + msgLen)]);
+            pos += msgLen;
+        }
+        return result;
+    }
+
+    static string EscapeControlCharacters(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (c <= '\x1F')
+                sb.Append((char)(0x2400 + c));
+            else if (c == '\x7F')
+                sb.Append('\u2421');
+            else if (c > '\x7F')
+                sb.Append($"\\x{(int)c:X2}");
+            else
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
 }

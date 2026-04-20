@@ -27,6 +27,7 @@ public sealed class TcpServerService : BackgroundService
 
     private readonly ILogger<TcpServerService> _logger;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _writeSemaphore = new(1, 1);
 
     private readonly List<LogEntry> _logBuffer = new(MaxLogEntries);
 
@@ -219,18 +220,23 @@ public sealed class TcpServerService : BackgroundService
             var byteData = Encoding.UTF8.GetBytes(commands[i]);
             byte[] header = { (byte)(byteData.Length / 256), (byte)(byteData.Length % 256) };
 
-            lock (_lock)
+            await _writeSemaphore.WaitAsync();
+            try
             {
                 if (_clientStream is { CanWrite: true })
                 {
-                    _clientStream.Write(header);
-                    _clientStream.Write(byteData);
+                    await _clientStream.WriteAsync(header);
+                    await _clientStream.WriteAsync(byteData);
                     totalSentBytes += byteData.Length;
                 }
                 else
                 {
                     throw new InvalidOperationException("Connection lost during file send.");
                 }
+            }
+            finally
+            {
+                _writeSemaphore.Release();
             }
 
             AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
@@ -254,12 +260,13 @@ public sealed class TcpServerService : BackgroundService
             var byteData = Encoding.UTF8.GetBytes(commands[i]);
             byte[] header = { (byte)(byteData.Length / 256), (byte)(byteData.Length % 256) };
 
-            lock (_lock)
+            await _writeSemaphore.WaitAsync();
+            try
             {
                 if (_clientStream is { CanWrite: true })
                 {
-                    _clientStream.Write(header);
-                    _clientStream.Write(byteData);
+                    await _clientStream.WriteAsync(header);
+                    await _clientStream.WriteAsync(byteData);
                     totalSentBytes += byteData.Length;
                 }
                 else
@@ -267,12 +274,14 @@ public sealed class TcpServerService : BackgroundService
                     throw new InvalidOperationException("Connection lost during send.");
                 }
             }
+            finally
+            {
+                _writeSemaphore.Release();
+            }
 
             AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
             AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(byteData)));
         }
-
-        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -286,20 +295,24 @@ public sealed class TcpServerService : BackgroundService
 
         var bytes = Encoding.UTF8.GetBytes(text);
 
-        lock (_lock)
+        await _writeSemaphore.WaitAsync();
+        try
         {
             if (_clientStream is { CanWrite: true })
             {
-                _clientStream.Write(bytes);
+                await _clientStream.WriteAsync(bytes);
             }
             else
             {
                 throw new InvalidOperationException("Connection lost.");
             }
         }
+        finally
+        {
+            _writeSemaphore.Release();
+        }
 
         AddLog("OUTGOING", $"Text sent ({bytes.Length} bytes): {FormatWithNamedChars(text)}");
-        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -319,20 +332,24 @@ public sealed class TcpServerService : BackgroundService
         for (int i = 0; i < bytes.Length; i++)
             bytes[i] = Convert.ToByte(cleaned.Substring(i * 2, 2), 16);
 
-        lock (_lock)
+        await _writeSemaphore.WaitAsync();
+        try
         {
             if (_clientStream is { CanWrite: true })
             {
-                _clientStream.Write(bytes);
+                await _clientStream.WriteAsync(bytes);
             }
             else
             {
                 throw new InvalidOperationException("Connection lost.");
             }
         }
+        finally
+        {
+            _writeSemaphore.Release();
+        }
 
         AddLog("OUTGOING", $"HEX sent ({bytes.Length} bytes): {BitConverter.ToString(bytes).Replace("-", " ")}");
-        await Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -424,9 +441,13 @@ public sealed class TcpServerService : BackgroundService
                         break;
                     }
                     
-                    var data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    AddLog("INCOMING", $"Incoming data ({bytesRead} bytes):");
-                    AddLog("DATA", FormatWithNamedChars(data));
+                    var messages = ParseMessages(buffer, bytesRead);
+                    AddLog("INCOMING", $"Incoming TCP data ({bytesRead} bytes, {messages.Count} msg):");
+                    foreach (var msg in messages)
+                    {
+                        var msgText = Encoding.UTF8.GetString(msg);
+                        AddLog("DATA", $"{FormatWithNamedChars(msgText)}");
+                    }
                 }
                 else
                 {
@@ -603,6 +624,21 @@ public sealed class TcpServerService : BackgroundService
 
     // Maps control chars to Unicode Control Pictures (U+2400–U+241F, U+2421)
     // so they render as single visible glyphs; JS copy handler restores original bytes.
+    private static List<byte[]> ParseMessages(byte[] buffer, int count)
+    {
+        var result = new List<byte[]>();
+        int pos = 0;
+        while (pos + 2 <= count)
+        {
+            int msgLen = buffer[pos] * 256 + buffer[pos + 1];
+            pos += 2;
+            if (msgLen <= 0 || pos + msgLen > count) break;
+            result.Add(buffer[pos..(pos + msgLen)]);
+            pos += msgLen;
+        }
+        return result;
+    }
+
     private static string FormatWithNamedChars(string text)
     {
         var sb = new System.Text.StringBuilder(text.Length);
