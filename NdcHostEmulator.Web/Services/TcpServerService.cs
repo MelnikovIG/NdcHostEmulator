@@ -241,6 +241,40 @@ public sealed class TcpServerService : BackgroundService
         AddLog("OUTGOING", $"File '{fileName}' sent: {commands.Length} commands, {totalSentBytes} bytes total");
     }
 
+    public async Task SendContent(string content)
+    {
+        if (!IsClientConnected)
+            throw new InvalidOperationException("No client connected.");
+
+        var commands = content.Split("[FIELD]").Where(x => x.Length > 0).ToArray();
+        var totalSentBytes = 0;
+
+        for (int i = 0; i < commands.Length; i++)
+        {
+            var byteData = Encoding.UTF8.GetBytes(commands[i]);
+            byte[] header = { (byte)(byteData.Length / 256), (byte)(byteData.Length % 256) };
+
+            lock (_lock)
+            {
+                if (_clientStream is { CanWrite: true })
+                {
+                    _clientStream.Write(header);
+                    _clientStream.Write(byteData);
+                    totalSentBytes += byteData.Length;
+                }
+                else
+                {
+                    throw new InvalidOperationException("Connection lost during send.");
+                }
+            }
+
+            AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
+            AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(byteData)));
+        }
+
+        await Task.CompletedTask;
+    }
+
     /// <summary>
     /// Sends a UTF-8 encoded text string to the connected client.
     /// </summary>

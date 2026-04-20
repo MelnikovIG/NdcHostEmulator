@@ -1,5 +1,6 @@
 @page "/files"
 @inject TcpServerService TcpService
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>FileSender — NDC Host Emulator</PageTitle>
@@ -60,50 +61,50 @@
 
     <!-- Панель предпросмотра и отправки -->
     <MudItem xs="12" md="8" Style="height: 100%;">
-        @if (_selectedFile == null)
-        {
-            <MudAlert Severity="Severity.Info">Выберите файл из списка</MudAlert>
-        }
-        else
-        {
-            <MudCard Elevation="2" Style="height: 100%; display: flex; flex-direction: column;">
-                <MudCardHeader>
-                    <CardHeaderContent>
-                        <MudText Typo="Typo.h6">@_selectedFile.Name</MudText>
+        <MudCard Elevation="2" Style="height: 100%; display: flex; flex-direction: column;">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">@(_selectedFile?.Name ?? "Редактор")</MudText>
+                    @if (_selectedFile != null)
+                    {
                         <MudText Typo="Typo.body2" Color="Color.Secondary">@_selectedFile.SizeFormatted</MudText>
-                    </CardHeaderContent>
-                    <CardHeaderActions>
-                        <MudButton Variant="Variant.Filled"
-                                   Color="Color.Primary"
-                                   StartIcon="@Icons.Material.Filled.Send"
-                                   OnClick="SendSelectedFile"
-                                   Disabled="@(!TcpService.IsClientConnected || _isSending)"
-                                   Size="Size.Small">
-                            @if (_isSending)
-                            {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                <span>Отправка...</span>
-                            }
-                            else
-                            {
-                                <span>Отправить</span>
-                            }
-                        </MudButton>
-                    </CardHeaderActions>
-                </MudCardHeader>
-                <MudCardContent Class="pa-0" Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
-                    <pre style="flex: 1; margin: 0; padding: 10px 12px; font-family: monospace; font-size: 11px;
-                                background: #1e1e1e; color: #ccc; overflow: auto;
-                                white-space: pre-wrap; word-break: break-all; min-height: 0;">@FormatPreview(_preview)</pre>
-                </MudCardContent>
-            </MudCard>
+                    }
+                </CardHeaderContent>
+                <CardHeaderActions>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Send"
+                               OnClick="SendSelectedFile"
+                               Disabled="@(!TcpService.IsClientConnected || _isSending)"
+                               Size="Size.Small">
+                        @if (_isSending)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            <span>Отправка...</span>
+                        }
+                        else
+                        {
+                            <span>Отправить</span>
+                        }
+                    </MudButton>
+                </CardHeaderActions>
+            </MudCardHeader>
+            <MudCardContent Class="pa-0" Style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0;">
+                <div @ref="_editorRef"
+                     contenteditable="true"
+                     spellcheck="false"
+                     style="flex: 1; margin: 0; padding: 10px 12px; font-family: monospace; font-size: 11px;
+                            background: #1e1e1e; color: #ccc; overflow: auto;
+                            white-space: pre-wrap; word-break: break-all; min-height: 0;
+                            border: none; outline: none; box-sizing: border-box;"></div>
+            </MudCardContent>
+        </MudCard>
 
-            @if (_sendResult != null)
-            {
-                <MudAlert Severity="@_sendResult.Severity" Class="mt-3" ShowCloseIcon="true" CloseIconClicked="ClearResult">
-                    @_sendResult.Message
-                </MudAlert>
-            }
+        @if (_sendResult != null)
+        {
+            <MudAlert Severity="@_sendResult.Severity" Class="mt-3" ShowCloseIcon="true" CloseIconClicked="ClearResult">
+                @_sendResult.Message
+            </MudAlert>
         }
     </MudItem>
 </MudGrid>
@@ -126,11 +127,22 @@
     private bool _isSending;
     private SendResultInfo? _sendResult;
     private string _filesDirectory = string.Empty;
+    private ElementReference _editorRef;
+    private bool _needsEditorUpdate;
 
     protected override void OnInitialized()
     {
         TcpService.OnConnectionChanged += OnConnectionChanged;
         LoadFiles();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needsEditorUpdate)
+        {
+            _needsEditorUpdate = false;
+            await JS.InvokeVoidAsync("contentEditor.setHtml", _editorRef, FormatPreview(_preview).Value);
+        }
     }
 
     private void LoadFiles()
@@ -149,7 +161,6 @@
             .Select(f => new FileItem(f.Name, f.FullName, f.Length, f.LastWriteTime))
             .ToList();
 
-        // Сбросить выбор если файл больше не существует
         if (_selectedFile != null && !_files.Any(f => f.FullPath == _selectedFile.FullPath))
         {
             _selectedFile = null;
@@ -174,6 +185,8 @@
         {
             _preview = $"Ошибка чтения: {ex.Message}";
         }
+
+        _needsEditorUpdate = true;
     }
 
     private static MarkupString FormatPreview(string text)
@@ -191,6 +204,21 @@
         return new MarkupString(sb.ToString());
     }
 
+    private static string ExtractTextFromEditor(string innerText)
+    {
+        var sb = new System.Text.StringBuilder(innerText.Length);
+        foreach (char c in innerText)
+        {
+            if (c >= 0x2400 && c <= 0x241F)
+                sb.Append((char)(c - 0x2400));
+            else if (c == 0x2421)
+                sb.Append((char)0x7F);
+            else
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     private string GetRowClass(FileItem item, int _)
     {
         return _selectedFile != null && item.FullPath == _selectedFile.FullPath
@@ -200,20 +228,21 @@
 
     private async Task SendSelectedFile()
     {
-        if (_selectedFile == null) return;
-
         _isSending = true;
         _sendResult = null;
 
         try
         {
+            var raw = await JS.InvokeAsync<string>("contentEditor.getText", _editorRef);
+            var content = ExtractTextFromEditor(raw);
+
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            await TcpService.SendFile(_selectedFile.FullPath);
+            await TcpService.SendContent(content);
             sw.Stop();
 
             _sendResult = new SendResultInfo(
                 Severity.Success,
-                $"Файл '{_selectedFile.Name}' отправлен за {sw.Elapsed.TotalSeconds:F2} с"
+                $"{(_selectedFile != null ? $"'{_selectedFile.Name}' о" : "О")}тправлено за {sw.Elapsed.TotalSeconds:F2} с"
             );
         }
         catch (Exception ex)
