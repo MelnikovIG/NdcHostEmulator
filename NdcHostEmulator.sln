@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NdcHostEmulator", "NdcHostEmulator\NdcHostEmulator.csproj", "{1FD694C3-16A8-4925-A6E4-BA335DCC0D7B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NdcHostEmulator.Console", "NdcHostEmulator.Console\NdcHostEmulator.Console.csproj", "{1FD694C3-16A8-4925-A6E4-BA335DCC0D7B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NdcHostEmulator.Web", "NdcHostEmulator.Web\NdcHostEmulator.Web.csproj", "{F8C45FC2-5935-4B81-B05D-D18BD41228DC}"
 EndProject

@@ -315,43 +315,6 @@ public sealed class TcpServerService : BackgroundService
         AddLog("OUTGOING", $"Text sent ({bytes.Length} bytes): {FormatWithNamedChars(text)}");
     }
 
-    /// <summary>
-    /// Parses a hex string and sends the resulting bytes to the connected client.
-    /// </summary>
-    /// <param name="hexInput">Hex string, e.g. "48 65 6C 6C 6F". Spaces, dashes, and "0x" prefixes are stripped.</param>
-    public async Task SendHex(string hexInput)
-    {
-        if (!IsClientConnected)
-            throw new InvalidOperationException("No client connected.");
-
-        var cleaned = hexInput.Replace(" ", "").Replace("-", "").Replace("0x", "");
-        if (cleaned.Length % 2 != 0)
-            throw new FormatException("Invalid HEX format: odd number of characters.");
-
-        var bytes = new byte[cleaned.Length / 2];
-        for (int i = 0; i < bytes.Length; i++)
-            bytes[i] = Convert.ToByte(cleaned.Substring(i * 2, 2), 16);
-
-        await _writeSemaphore.WaitAsync();
-        try
-        {
-            if (_clientStream is { CanWrite: true })
-            {
-                await _clientStream.WriteAsync(bytes);
-            }
-            else
-            {
-                throw new InvalidOperationException("Connection lost.");
-            }
-        }
-        finally
-        {
-            _writeSemaphore.Release();
-        }
-
-        AddLog("OUTGOING", $"HEX sent ({bytes.Length} bytes): {BitConverter.ToString(bytes).Replace("-", " ")}");
-    }
-
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
