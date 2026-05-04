@@ -2,16 +2,21 @@
 @inject NavigationManager NavigationManager
 @implements IDisposable
 
-<MudThemeProvider />
+<MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudMainContent Style="padding-top: 0;">
-        <div style="display: flex; flex-direction: column; height: 100vh; overflow: hidden;">
+    <MudAppBar Elevation="4" Color="Color.Primary">
+        <MudText Typo="Typo.h6">NDC Host Emulator</MudText>
+        <MudSpacer />
+        <ConnectionStatusBar />
+    </MudAppBar>
+    <MudMainContent>
+        <div style="display: flex; flex-direction: column; height: calc(100vh - 64px); overflow: hidden;">
 
-            <MudTabs Elevation="2"
+            <MudTabs Elevation="0"
                      Rounded="false"
                      ApplyEffectsToContainer="true"
                      ActivePanelIndex="_activePanelIndex"
@@ -43,6 +48,22 @@
 
 @code {
     private static readonly string[] TabUrls = ["/", "/files", "/settings"];
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976D2",
+            Secondary = "#E91E63",
+            AppbarBackground = "#1976D2",
+            AppbarText = "#FFFFFF",
+            Background = "#FAFAFA",
+            Surface = "#FFFFFF",
+            TextPrimary = "#212121",
+            TextSecondary = "#757575",
+            Divider = "#BDBDBD",
+        }
+    };
 
     private MudTabs? _tabs;
     private int _activePanelIndex;
