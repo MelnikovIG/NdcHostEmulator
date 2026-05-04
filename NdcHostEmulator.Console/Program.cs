@@ -273,6 +273,7 @@ async Task SendCommandsAsync(string text)
     var commands = text.Split("[FIELD]", StringSplitOptions.RemoveEmptyEntries);
     for (int i = 0; i < commands.Length; i++)
     {
+        AnsiConsole.Write(new Rule() { Style = Style.Parse("yellow dim") });
         LogMessage("OUTGOING", $"📤 Команда {i + 1}/{commands.Length}", ConsoleColor.Green);
         await SendMessageAsync(Encoding.UTF8.GetBytes(UnescapeControlCharacters(commands[i])));
     }
