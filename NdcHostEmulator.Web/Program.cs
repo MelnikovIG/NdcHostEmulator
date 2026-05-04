@@ -34,8 +34,8 @@ try
         options.KeepAliveInterval = TimeSpan.FromSeconds(30);
     });
 
-    builder.Services.AddSingleton<TcpServerService>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<TcpServerService>());
+    builder.Services.AddSingleton<TerminalManager>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<TerminalManager>());
 
     var app = builder.Build();
 

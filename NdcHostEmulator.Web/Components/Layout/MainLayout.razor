@@ -23,7 +23,6 @@
                      ActivePanelIndexChanged="OnTabChanged"
                      @ref="_tabs">
                 <MudTabPanel Text="Dashboard" Icon="@Icons.Material.Filled.Dashboard" />
-                <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder" />
                 <MudTabPanel Text="Настройки" Icon="@Icons.Material.Filled.Settings" />
             </MudTabs>
 
@@ -47,7 +46,7 @@
 </div>
 
 @code {
-    private static readonly string[] TabUrls = ["/", "/files", "/settings"];
+    private static readonly string[] TabUrls = ["/", "/settings"];
 
     private readonly MudTheme _theme = new()
     {
@@ -103,7 +102,6 @@
     {
         var path = new Uri(NavigationManager.Uri).AbsolutePath.TrimEnd('/');
         if (string.IsNullOrEmpty(path)) path = "/";
-
         var idx = Array.FindIndex(TabUrls, u => u == path);
         return idx >= 0 ? idx : 0;
     }

@@ -1,0 +1,104 @@
+@inject TerminalManager TerminalManager
+@inject NavigationManager Nav
+@implements IDisposable
+
+<MudCard Elevation="2" Style="cursor:pointer;" @onclick="NavigateToTerminal">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                <MudIcon Icon="@Icons.Material.Filled.Atm"
+                         Color="@(Terminal.IsClientConnected ? Color.Success : Terminal.IsListening ? Color.Warning : Color.Default)"
+                         Size="Size.Medium" />
+                <div>
+                    <MudText Typo="Typo.h6" Style="line-height:1.2">@Terminal.Name</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Port @Terminal.Port</MudText>
+                </div>
+            </MudStack>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            @if (Terminal.IsClientConnected)
+            {
+                <MudChip T="string" Color="Color.Success" Size="Size.Small">Подключён</MudChip>
+            }
+            else if (Terminal.IsListening)
+            {
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small">Ожидание</MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Color="Color.Default" Size="Size.Small">Остановлен</MudChip>
+            }
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent Class="pt-0">
+        @if (Terminal.IsClientConnected)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                <MudIcon Icon="@Icons.Material.Filled.Computer" Size="Size.Small" Style="vertical-align:middle;margin-right:4px;" />
+                @Terminal.CurrentClientInfo
+            </MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Terminal.FilesDirectory</MudText>
+        }
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Size="Size.Small"
+                   Variant="Variant.Text"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.OpenInNew"
+                   OnClick="NavigateToTerminal"
+                   OnClickStopPropagation="true">
+            Открыть
+        </MudButton>
+        @if (Terminal.IsClientConnected)
+        {
+            <MudButton Size="Size.Small"
+                       Variant="Variant.Text"
+                       Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.WifiOff"
+                       OnClick="DisconnectAsync"
+                       OnClickStopPropagation="true">
+                Отключить
+            </MudButton>
+        }
+        <MudSpacer />
+        <MudTooltip Text="Удалить терминал">
+            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                           Size="Size.Small"
+                           Color="Color.Error"
+                           OnClick="DeleteAsync"
+                           OnClickStopPropagation="true" />
+        </MudTooltip>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public TcpTerminal Terminal { get; set; } = null!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Terminal.OnConnectionChanged += OnStateChanged;
+    }
+
+    private void NavigateToTerminal()
+        => Nav.NavigateTo($"/terminal/{Terminal.Port}");
+
+    private async Task DisconnectAsync()
+    {
+        await Terminal.DisconnectClient();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        await TerminalManager.RemoveTerminal(Terminal.Port);
+        await OnChanged.InvokeAsync();
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Terminal.OnConnectionChanged -= OnStateChanged;
+}

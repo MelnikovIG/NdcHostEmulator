@@ -1,0 +1,409 @@
+@page "/terminal/{Port:int}"
+@inject TerminalManager TerminalManager
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@if (_terminal == null)
+{
+    <MudAlert Severity="Severity.Error">Терминал на порту @Port не найден.</MudAlert>
+    <MudButton OnClick='() => Nav.NavigateTo("/")' Class="mt-2">← На главную</MudButton>
+    return;
+}
+
+<PageTitle>@_terminal.Name — NDC Host Emulator</PageTitle>
+
+<MudStack Spacing="0" Style="height:100%;overflow:hidden;">
+    <!-- Breadcrumb -->
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mb-2">
+        <MudLink Href="/" Typo="Typo.body2" Color="Color.Primary">Dashboard</MudLink>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">/</MudText>
+        <MudText Typo="Typo.body2">@_terminal.Name</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">(порт @Port)</MudText>
+        <MudSpacer />
+        @if (_terminal.IsClientConnected)
+        {
+            <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.Wifi">
+                @_terminal.CurrentClientInfo
+            </MudChip>
+        }
+        else if (_terminal.IsListening)
+        {
+            <MudChip T="string" Color="Color.Warning" Size="Size.Small" Icon="@Icons.Material.Filled.WifiFind">
+                Ожидание подключения
+            </MudChip>
+        }
+    </MudStack>
+
+    <!-- Tabs -->
+    <MudTabs Elevation="1" Rounded="false" @bind-ActivePanelIndex="_activeTab" Style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+
+        <!-- Статус -->
+        <MudTabPanel Text="Статус" Icon="@Icons.Material.Filled.Info">
+            <MudGrid Spacing="3" Class="pa-3">
+                <MudItem xs="12" md="5">
+                    <MudCard Elevation="1">
+                        <MudCardHeader>
+                            <CardHeaderContent><MudText Typo="Typo.h6">Соединение</MudText></CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            <MudStack Spacing="1">
+                                <MudText><b>Имя:</b> @_terminal.Name</MudText>
+                                <MudText><b>Порт:</b> @_terminal.Port</MudText>
+                                <MudText><b>Статус:</b>
+                                    @if (_terminal.IsClientConnected)
+                                    { <MudChip T="string" Color="Color.Success" Size="Size.Small">Подключён</MudChip> }
+                                    else if (_terminal.IsListening)
+                                    { <MudChip T="string" Color="Color.Warning" Size="Size.Small">Ожидание</MudChip> }
+                                    else
+                                    { <MudChip T="string" Color="Color.Default" Size="Size.Small">Остановлен</MudChip> }
+                                </MudText>
+                                @if (_terminal.IsClientConnected)
+                                {
+                                    <MudText><b>Клиент:</b> @_terminal.CurrentClientInfo</MudText>
+                                }
+                                <MudText><b>Директория:</b> @_terminal.FilesDirectory</MudText>
+                            </MudStack>
+                        </MudCardContent>
+                        <MudCardActions>
+                            @if (_terminal.IsClientConnected)
+                            {
+                                <MudButton Color="Color.Error" Variant="Variant.Outlined"
+                                           StartIcon="@Icons.Material.Filled.WifiOff"
+                                           OnClick="DisconnectClientAsync">Отключить клиента</MudButton>
+                            }
+                            @if (_terminal.IsListening)
+                            {
+                                <MudButton Color="Color.Warning" Variant="Variant.Outlined"
+                                           StartIcon="@Icons.Material.Filled.Stop"
+                                           OnClick="StopAsync">Остановить</MudButton>
+                            }
+                            else
+                            {
+                                <MudButton Color="Color.Success" Variant="Variant.Outlined"
+                                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                                           OnClick="StartAsync">Запустить</MudButton>
+                            }
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <!-- Файлы -->
+        <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder">
+            <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;padding:12px;gap:8px;">
+                <!-- Тулбар: выбор файла + отправка -->
+                <MudPaper Elevation="1" Class="pa-2">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.NoWrap">
+                        <MudMenu StartIcon="@Icons.Material.Filled.FolderOpen"
+                                 Label="Выбрать файл"
+                                 Variant="Variant.Outlined"
+                                 Color="Color.Default"
+                                 Size="Size.Small"
+                                 Disabled="@(_files.Count == 0)">
+                            @foreach (var f in _files)
+                            {
+                                <MudMenuItem OnClick="@(() => LoadFileIntoEditor(f))">
+                                    <MudStack Spacing="0">
+                                        <MudText Typo="Typo.body2">@f.Name</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@f.SizeFormatted</MudText>
+                                    </MudStack>
+                                </MudMenuItem>
+                            }
+                        </MudMenu>
+                        <MudTooltip Text="Обновить список файлов">
+                            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                           Size="Size.Small"
+                                           OnClick="LoadFiles" />
+                        </MudTooltip>
+                        @if (_selectedFile != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                                     OnClose="ClearEditor">
+                                @_selectedFile.Name
+                            </MudChip>
+                        }
+                        <MudSpacer />
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Send"
+                                   OnClick="SendAsync"
+                                   Disabled="@(!_terminal.IsClientConnected || _isSending)"
+                                   Size="Size.Small">
+                            @if (_isSending)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <span>Отправка...</span>
+                            }
+                            else
+                            {
+                                <span>Отправить</span>
+                            }
+                        </MudButton>
+                    </MudStack>
+                </MudPaper>
+
+                <!-- Редактор -->
+                <div style="flex:1;min-height:0;border-radius:4px;overflow:hidden;">
+                    <div @ref="_editorRef"
+                         contenteditable="true"
+                         spellcheck="false"
+                         style="height:100%;padding:10px 12px;font-family:monospace;font-size:11px;
+                                background:#1e1e1e;color:#ccc;overflow:auto;
+                                white-space:pre-wrap;word-break:break-all;
+                                border:none;outline:none;box-sizing:border-box;"></div>
+                </div>
+
+                @if (_sendResult != null)
+                {
+                    <MudAlert Severity="@_sendResult.Severity" Dense="true"
+                              ShowCloseIcon="true" CloseIconClicked="() => _sendResult = null">
+                        @_sendResult.Message
+                    </MudAlert>
+                }
+            </div>
+        </MudTabPanel>
+
+        <!-- Логи -->
+        <MudTabPanel Text="Логи" Icon="@Icons.Material.Filled.Terminal">
+            <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;padding:12px;">
+                <!-- Toolbar -->
+                <MudPaper Elevation="1" Class="pa-2 mb-2">
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" @bind-Value="_logSearch"
+                                          Placeholder="Поиск..."
+                                          Adornment="Adornment.Start"
+                                          AdornmentIcon="@Icons.Material.Filled.Search"
+                                          Clearable="true" Immediate="true"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudStack Row="true" Spacing="1" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
+                                @foreach (var t in _allLogTypes)
+                                {
+                                    <MudChip T="string" Size="Size.Small"
+                                             Variant="@(_activeLogTypes.Contains(t) ? Variant.Filled : Variant.Outlined)"
+                                             Style="@($"color:{GetLogColor(t)};border-color:{GetLogColor(t)};cursor:pointer;")"
+                                             OnClick="@(() => ToggleLogType(t))">@t</MudChip>
+                                }
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="6" sm="1">
+                            <MudSwitch T="bool" @bind-Value="_logAutoScroll" Color="Color.Primary" Label="Скролл" />
+                        </MudItem>
+                        <MudItem xs="6" sm="1" Class="d-flex justify-end align-center">
+                            <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
+                                           Color="Color.Error" Size="Size.Small"
+                                           OnClick="() => _logs.Clear()" />
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+                <!-- Log area -->
+                <MudPaper Elevation="2" Style="flex:1;background:#1e1e1e;overflow-y:auto;">
+                    <div id="terminal-log-@Port" style="font-family:monospace;font-size:12px;">
+                        @foreach (var entry in FilteredLogs)
+                        {
+                            <div style="padding:2px 12px;border-bottom:1px solid #2a2a2a;">
+                                <span style="color:#666;user-select:none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
+                                <span style="font-weight:bold;color:@GetLogColor(entry.Type);"> [@entry.Type]</span>
+                                <span style="color:#ccc;"> @entry.Message</span>
+                            </div>
+                        }
+                        <div id="terminal-log-bottom-@Port"></div>
+                    </div>
+                </MudPaper>
+            </div>
+        </MudTabPanel>
+
+    </MudTabs>
+</MudStack>
+
+@code {
+    [Parameter] public int Port { get; set; }
+
+    private TcpTerminal? _terminal;
+    private int _activeTab;
+    private bool _isSending;
+
+    // Files tab
+    private sealed record FileItem(string Name, string FullPath, long SizeBytes, DateTime LastModified)
+    {
+        public string SizeFormatted => SizeBytes >= 1024 ? $"{SizeBytes / 1024.0:F1} KB" : $"{SizeBytes} B";
+    }
+    private sealed record SendResultInfo(Severity Severity, string Message);
+    private List<FileItem> _files = new();
+    private FileItem? _selectedFile;
+    private SendResultInfo? _sendResult;
+    private ElementReference _editorRef;
+    private bool _needsEditorUpdate;
+    private string _editorContent = string.Empty;
+
+    // Logs tab
+    private static readonly string[] _allLogTypes =
+        ["CONNECT", "DISCONNECT", "INCOMING", "OUTGOING", "DATA", "ERROR", "SYSTEM"];
+    private List<LogEntry> _logs = new();
+    private string _logSearch = string.Empty;
+    private HashSet<string> _activeLogTypes = new(_allLogTypes);
+    private bool _logAutoScroll = true;
+
+    private IEnumerable<LogEntry> FilteredLogs => _logs
+        .Where(e => _activeLogTypes.Contains(e.Type))
+        .Where(e => string.IsNullOrWhiteSpace(_logSearch) ||
+                    e.Message.Contains(_logSearch, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized()
+    {
+        _terminal = TerminalManager.GetByPort(Port);
+        if (_terminal == null) return;
+
+        _terminal.OnConnectionChanged += OnConnectionChanged;
+        _terminal.OnLogEntry += OnLogEntry;
+        _logs = _terminal.GetRecentLogs(500).ToList();
+        LoadFiles();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needsEditorUpdate)
+        {
+            _needsEditorUpdate = false;
+            await JS.InvokeVoidAsync("contentEditor.setHtml", _editorRef,
+                FormatPreview(_editorContent).Value);
+        }
+    }
+
+    private void LoadFiles()
+    {
+        if (_terminal == null) return;
+        var dir = _terminal.FilesDirectory;
+        if (!Directory.Exists(dir)) { _files = new(); return; }
+        _files = Directory.GetFiles(dir)
+            .Select(f => new FileInfo(f))
+            .OrderBy(f => f.Name)
+            .Select(f => new FileItem(f.Name, f.FullName, f.Length, f.LastWriteTime))
+            .ToList();
+    }
+
+    private async Task LoadFileIntoEditor(FileItem file)
+    {
+        _selectedFile = file;
+        _sendResult = null;
+        try { _editorContent = await File.ReadAllTextAsync(file.FullPath); }
+        catch (Exception ex) { _editorContent = $"Ошибка чтения: {ex.Message}"; }
+        _needsEditorUpdate = true;
+    }
+
+    private void ClearEditor()
+    {
+        _selectedFile = null;
+        _editorContent = string.Empty;
+        _needsEditorUpdate = true;
+    }
+
+    private async Task SendAsync()
+    {
+        if (_terminal == null) return;
+        _isSending = true;
+        _sendResult = null;
+        try
+        {
+            var raw = await JS.InvokeAsync<string>("contentEditor.getText", _editorRef);
+            var content = ExtractText(raw);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await _terminal.SendContent(content);
+            sw.Stop();
+            _sendResult = new(Severity.Success,
+                $"{(_selectedFile != null ? $"'{_selectedFile.Name}' о" : "О")}тправлено за {sw.Elapsed.TotalSeconds:F2} с");
+        }
+        catch (Exception ex) { _sendResult = new(Severity.Error, $"Ошибка: {ex.Message}"); }
+        finally { _isSending = false; }
+    }
+
+    private async Task DisconnectClientAsync()
+    {
+        if (_terminal == null) return;
+        await _terminal.DisconnectClient();
+    }
+
+    private async Task StartAsync()
+    {
+        if (_terminal == null) return;
+        try { await _terminal.StartAsync(); }
+        catch (Exception ex) { Snackbar.Add($"Ошибка: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task StopAsync()
+    {
+        if (_terminal == null) return;
+        await _terminal.StopAsync();
+    }
+
+    private void OnConnectionChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLogEntry(LogEntry entry)
+    {
+        InvokeAsync(async () =>
+        {
+            _logs.Add(entry);
+            if (_logs.Count > 1000) _logs.RemoveAt(0);
+            StateHasChanged();
+            if (_logAutoScroll)
+            {
+                await Task.Delay(50);
+                await JS.InvokeVoidAsync("scrollToBottom", $"terminal-log-bottom-{Port}");
+            }
+        });
+    }
+
+    private void ToggleLogType(string t)
+    {
+        if (!_activeLogTypes.Remove(t)) _activeLogTypes.Add(t);
+    }
+
+    private static MarkupString FormatPreview(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length * 2);
+        foreach (char c in text)
+        {
+            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t')
+                sb.Append($"<span class=\"ctrl-pic\">{(char)(0x2400 + c)}</span>");
+            else if (c == 0x7F) sb.Append("<span class=\"ctrl-pic\">␡</span>");
+            else sb.Append(c switch { '<' => "&lt;", '>' => "&gt;", '&' => "&amp;", _ => c.ToString() });
+        }
+        return new MarkupString(sb.ToString());
+    }
+
+    private static string ExtractText(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (char c in s)
+        {
+            if (c >= 0x2400 && c <= 0x241F) sb.Append((char)(c - 0x2400));
+            else if (c == 0x2421) sb.Append((char)0x7F);
+            else sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
+    private static string GetLogColor(string type) => type switch
+    {
+        "CONNECT"    => "#4ec9b0",
+        "DISCONNECT" => "#ce9178",
+        "INCOMING"   => "#569cd6",
+        "DATA"       => "#9cdcfe",
+        "OUTGOING"   => "#4ec9b0",
+        "ERROR"      => "#f44747",
+        "SYSTEM"     => "#888888",
+        _            => "#cccccc"
+    };
+
+    public void Dispose()
+    {
+        if (_terminal == null) return;
+        _terminal.OnConnectionChanged -= OnConnectionChanged;
+        _terminal.OnLogEntry -= OnLogEntry;
+    }
+}

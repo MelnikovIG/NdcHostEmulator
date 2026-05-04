@@ -1,49 +1,50 @@
-@inject TcpServerService TcpService
+@inject TerminalManager TerminalManager
 @implements IDisposable
 
-@if (TcpService.IsClientConnected)
+@{
+    var connected = TerminalManager.Terminals.Count(t => t.IsClientConnected);
+    var listening = TerminalManager.Terminals.Count(t => t.IsListening);
+    var total = TerminalManager.Terminals.Count;
+}
+
+@if (total == 0)
+{
+    <MudChip T="string" Color="Color.Default" Size="Size.Small" Icon="@Icons.Material.Filled.WifiOff">
+        Нет терминалов
+    </MudChip>
+}
+else if (connected > 0)
 {
     <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.Wifi">
-        @TcpService.CurrentClientInfo
+        @connected / @total подключено
     </MudChip>
-    <MudTooltip Text="Отключить клиента">
-        <MudIconButton Icon="@Icons.Material.Filled.WifiOff"
-                       Color="Color.Warning"
-                       Size="Size.Small"
-                       OnClick="DisconnectAsync" />
-    </MudTooltip>
 }
-else if (TcpService.IsListening)
+else if (listening > 0)
 {
     <MudChip T="string" Color="Color.Warning" Size="Size.Small" Icon="@Icons.Material.Filled.WifiFind">
-        Порт @TcpService.CurrentPort — ожидание...
+        @listening / @total ожидают
     </MudChip>
 }
 else
 {
     <MudChip T="string" Color="Color.Error" Size="Size.Small" Icon="@Icons.Material.Filled.WifiOff">
-        Сервер остановлен
+        @total остановлено
     </MudChip>
 }
 
 @code {
     protected override void OnInitialized()
     {
-        TcpService.OnConnectionChanged += OnConnectionChanged;
+        TerminalManager.OnTerminalsChanged += OnChanged;
+        TerminalManager.OnAnyConnectionChanged += OnAnyConnectionChanged;
     }
 
-    private void OnConnectionChanged()
-    {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private async Task DisconnectAsync()
-    {
-        await TcpService.DisconnectClient();
-    }
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    private void OnAnyConnectionChanged(int _) => InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
-        TcpService.OnConnectionChanged -= OnConnectionChanged;
+        TerminalManager.OnTerminalsChanged -= OnChanged;
+        TerminalManager.OnAnyConnectionChanged -= OnAnyConnectionChanged;
     }
 }

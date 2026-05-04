@@ -1,100 +1,128 @@
 @page "/"
-@inject TcpServerService TcpService
+@inject TerminalManager TerminalManager
 @implements IDisposable
 
-<PageTitle>NDC Host Emulator — Dashboard</PageTitle>
+<PageTitle>Dashboard — NDC Host Emulator</PageTitle>
 
-<MudGrid Spacing="3">
+<MudStack Spacing="3">
+    <!-- Заголовок + кнопка добавления -->
+    <MudStack Row="true" AlignItems="AlignItems.Center">
+        <MudText Typo="Typo.h5">Терминалы</MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenAddDialog">
+            Добавить терминал
+        </MudButton>
+    </MudStack>
 
-    <!-- Статус сервера -->
-    <MudItem xs="12" md="4">
-        <MudCard Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">Сервер</MudText>
-                </CardHeaderContent>
-                <CardHeaderActions>
-                    @if (TcpService.IsListening)
-                    {
-                        <MudChip T="string" Color="Color.Success" Size="Size.Small">Запущен</MudChip>
-                    }
-                    else
-                    {
-                        <MudChip T="string" Color="Color.Error" Size="Size.Small">Остановлен</MudChip>
-                    }
-                </CardHeaderActions>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudStack Spacing="1">
-                    <MudText><b>Порт:</b> @(TcpService.IsListening ? TcpService.CurrentPort.ToString() : "—")</MudText>
-                    <MudText><b>Статус клиента:</b>
-                        @if (TcpService.IsClientConnected)
-                        {
-                            <MudChip T="string" Color="Color.Success" Size="Size.Small">Подключён</MudChip>
-                        }
-                        else
-                        {
-                            <MudChip T="string" Color="Color.Default" Size="Size.Small">Ожидание</MudChip>
-                        }
-                    </MudText>
-                    @if (TcpService.IsClientConnected)
-                    {
-                        <MudText><b>Клиент:</b> @TcpService.CurrentClientInfo</MudText>
-                    }
-                </MudStack>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
+    <!-- Список терминалов -->
+    @if (!TerminalManager.Terminals.Any())
+    {
+        <MudAlert Severity="Severity.Info">
+            Нет терминалов. Нажмите «Добавить терминал» чтобы начать.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid Spacing="3">
+            @foreach (var terminal in TerminalManager.Terminals.OrderBy(t => t.Port))
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <TerminalCard Terminal="terminal" OnChanged="StateHasChanged" />
+                </MudItem>
+            }
+        </MudGrid>
+    }
+</MudStack>
 
-    <!-- Быстрые действия -->
-    <MudItem xs="12" md="8">
-        <MudCard Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">Быстрые действия</MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Folder"
-                               Href="files"
-                               Disabled="@(!TcpService.IsClientConnected)">
-                        Отправить файл
-                    </MudButton>
-<MudButton Variant="Variant.Outlined"
-                               Color="Color.Error"
-                               StartIcon="@Icons.Material.Filled.WifiOff"
-                               OnClick="DisconnectAsync"
-                               Disabled="@(!TcpService.IsClientConnected)">
-                        Отключить клиента
-                    </MudButton>
-                </MudStack>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-
-</MudGrid>
+<!-- Диалог добавления терминала -->
+@if (_showAddDialog)
+{
+    <MudOverlay Visible="true" DarkBackground="true" OnClick="CloseAddDialog" />
+    <MudPaper Elevation="8"
+              Style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1400;min-width:380px;"
+              Class="pa-6">
+        <MudText Typo="Typo.h6" Class="mb-4">Новый терминал</MudText>
+        <MudStack Spacing="3">
+            <MudTextField T="string" @bind-Value="_newName" Label="Имя" Variant="Variant.Outlined" />
+            <MudNumericField T="int" @bind-Value="_newPort" Label="Порт" Min="1" Max="65535"
+                             Variant="Variant.Outlined"
+                             HelperText="Порт изменить нельзя после создания" />
+            <MudTextField T="string" @bind-Value="_newFilesDir" Label="Директория файлов"
+                          Variant="Variant.Outlined" />
+            @if (_addError != null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_addError</MudAlert>
+            }
+        </MudStack>
+        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-4">
+            <MudButton OnClick="CloseAddDialog">Отмена</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="AddTerminalAsync" Disabled="_isAdding">
+                @if (_isAdding) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Создать
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+}
 
 @code {
+    private bool _showAddDialog;
+    private string _newName = "ATM";
+    private int _newPort = 4070;
+    private string _newFilesDir = "./Files";
+    private string? _addError;
+    private bool _isAdding;
+
     protected override void OnInitialized()
     {
-        TcpService.OnConnectionChanged += OnConnectionChanged;
+        TerminalManager.OnTerminalsChanged += OnChanged;
+        TerminalManager.OnAnyConnectionChanged += OnAnyConnectionChanged;
     }
 
-    private void OnConnectionChanged()
+    private void OpenAddDialog()
     {
-        InvokeAsync(StateHasChanged);
+        _newName = $"ATM-{TerminalManager.Terminals.Count + 1}";
+        _newPort = GetNextAvailablePort();
+        _newFilesDir = "./Files";
+        _addError = null;
+        _showAddDialog = true;
     }
 
-    private async Task DisconnectAsync()
+    private void CloseAddDialog() => _showAddDialog = false;
+
+    private async Task AddTerminalAsync()
     {
-        await TcpService.DisconnectClient();
+        _addError = null;
+        if (string.IsNullOrWhiteSpace(_newName)) { _addError = "Укажите имя"; return; }
+        if (_newPort < 1 || _newPort > 65535) { _addError = "Порт должен быть от 1 до 65535"; return; }
+
+        _isAdding = true;
+        try
+        {
+            await TerminalManager.AddTerminal(_newName, _newPort, _newFilesDir);
+            _showAddDialog = false;
+        }
+        catch (Exception ex) { _addError = ex.Message; }
+        finally { _isAdding = false; }
     }
+
+    private int GetNextAvailablePort()
+    {
+        var ports = TerminalManager.Terminals.Select(t => t.Port).ToHashSet();
+        var candidate = 4070;
+        while (ports.Contains(candidate)) candidate++;
+        return candidate;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    private void OnAnyConnectionChanged(int _) => InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
-        TcpService.OnConnectionChanged -= OnConnectionChanged;
+        TerminalManager.OnTerminalsChanged -= OnChanged;
+        TerminalManager.OnAnyConnectionChanged -= OnAnyConnectionChanged;
     }
 }
