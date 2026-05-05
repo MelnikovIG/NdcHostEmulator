@@ -50,18 +50,6 @@ public sealed class TerminalManager : BackgroundService
         OnTerminalsChanged?.Invoke();
     }
 
-    public Task UpdateTerminal(int port, string name, string filesDirectory)
-    {
-        if (_terminals.TryGetValue(port, out var terminal))
-        {
-            terminal.Name = name;
-            terminal.FilesDirectory = filesDirectory;
-            SaveSettings();
-            OnTerminalsChanged?.Invoke();
-        }
-        return Task.CompletedTask;
-    }
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         foreach (var cfg in LoadSettings())
@@ -88,6 +76,8 @@ public sealed class TerminalManager : BackgroundService
 
     private record TerminalConfig(string Name, int Port, string FilesDirectory);
 
+    private record StateFile(TerminalConfig[] Terminals);
+
     private static string StatePath => Path.Combine(AppContext.BaseDirectory, "state.json");
 
     private List<TerminalConfig> LoadSettings()
@@ -98,27 +88,11 @@ public sealed class TerminalManager : BackgroundService
                 return [new("ATM-1", 4070, "./Files")];
 
             var json = File.ReadAllText(StatePath);
-            var doc = JsonDocument.Parse(json);
+            var state = JsonSerializer.Deserialize<StateFile>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            if (doc.RootElement.TryGetProperty("Terminals", out var arr))
-            {
-                var list = new List<TerminalConfig>();
-                foreach (var t in arr.EnumerateArray())
-                {
-                    var name = t.TryGetProperty("Name", out var n) ? n.GetString() ?? "Terminal" : "Terminal";
-                    var port = t.TryGetProperty("Port", out var p) && p.TryGetInt32(out var pv) ? pv : 4070;
-                    var dir  = t.TryGetProperty("FilesDirectory", out var d) ? d.GetString() ?? "./Files" : "./Files";
-                    list.Add(new(name, port, dir));
-                }
-                return list.Count > 0 ? list : [new("ATM-1", 4070, "./Files")];
-            }
-
-            // Migrate from old single-terminal format
-            var oldPort = 4070;
-            var oldDir = "./Files";
-            if (doc.RootElement.TryGetProperty("LastPort", out var lp) && lp.TryGetInt32(out var lpv)) oldPort = lpv;
-            if (doc.RootElement.TryGetProperty("FilesDirectory", out var ld) && ld.GetString() is { } ldv) oldDir = ldv;
-            return [new("ATM-1", oldPort, oldDir)];
+            var list = state?.Terminals?.ToList() ?? [];
+            return list.Count > 0 ? list : [new("ATM-1", 4070, "./Files")];
         }
         catch { return [new("ATM-1", 4070, "./Files")]; }
     }
@@ -127,13 +101,11 @@ public sealed class TerminalManager : BackgroundService
     {
         try
         {
-            var state = new
-            {
-                Terminals = _terminals.Values
+            var state = new StateFile(
+                _terminals.Values
                     .OrderBy(t => t.Port)
-                    .Select(t => new { t.Name, t.Port, t.FilesDirectory })
-                    .ToArray()
-            };
+                    .Select(t => new TerminalConfig(t.Name, t.Port, t.FilesDirectory))
+                    .ToArray());
             File.WriteAllText(StatePath,
                 JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

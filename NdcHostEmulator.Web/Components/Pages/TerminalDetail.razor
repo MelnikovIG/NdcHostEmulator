@@ -166,58 +166,6 @@
             </div>
         </MudTabPanel>
 
-        <!-- Логи -->
-        <MudTabPanel Text="Логи" Icon="@Icons.Material.Filled.Terminal">
-            <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;padding:12px;">
-                <!-- Toolbar -->
-                <MudPaper Elevation="1" Class="pa-2 mb-2">
-                    <MudGrid Spacing="2">
-                        <MudItem xs="12" sm="4">
-                            <MudTextField T="string" @bind-Value="_logSearch"
-                                          Placeholder="Поиск..."
-                                          Adornment="Adornment.Start"
-                                          AdornmentIcon="@Icons.Material.Filled.Search"
-                                          Clearable="true" Immediate="true"
-                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
-                        </MudItem>
-                        <MudItem xs="12" sm="6">
-                            <MudStack Row="true" Spacing="1" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
-                                @foreach (var t in _allLogTypes)
-                                {
-                                    <MudChip T="string" Size="Size.Small"
-                                             Variant="@(_activeLogTypes.Contains(t) ? Variant.Filled : Variant.Outlined)"
-                                             Style="@($"color:{GetLogColor(t)};border-color:{GetLogColor(t)};cursor:pointer;")"
-                                             OnClick="@(() => ToggleLogType(t))">@t</MudChip>
-                                }
-                            </MudStack>
-                        </MudItem>
-                        <MudItem xs="6" sm="1">
-                            <MudSwitch T="bool" @bind-Value="_logAutoScroll" Color="Color.Primary" Label="Скролл" />
-                        </MudItem>
-                        <MudItem xs="6" sm="1" Class="d-flex justify-end align-center">
-                            <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
-                                           Color="Color.Error" Size="Size.Small"
-                                           OnClick="() => _logs.Clear()" />
-                        </MudItem>
-                    </MudGrid>
-                </MudPaper>
-                <!-- Log area -->
-                <MudPaper Elevation="2" Style="flex:1;background:#1e1e1e;overflow-y:auto;">
-                    <div id="terminal-log-@Port" style="font-family:monospace;font-size:12px;">
-                        @foreach (var entry in FilteredLogs)
-                        {
-                            <div style="padding:2px 12px;border-bottom:1px solid #2a2a2a;">
-                                <span style="color:#666;user-select:none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
-                                <span style="font-weight:bold;color:@GetLogColor(entry.Type);"> [@entry.Type]</span>
-                                <span style="color:#ccc;"> @entry.Message</span>
-                            </div>
-                        }
-                        <div id="terminal-log-bottom-@Port"></div>
-                    </div>
-                </MudPaper>
-            </div>
-        </MudTabPanel>
-
     </MudTabs>
 </MudStack>
 
@@ -241,27 +189,12 @@
     private bool _needsEditorUpdate;
     private string _editorContent = string.Empty;
 
-    // Logs tab
-    private static readonly string[] _allLogTypes =
-        ["CONNECT", "DISCONNECT", "INCOMING", "OUTGOING", "DATA", "ERROR", "SYSTEM"];
-    private List<LogEntry> _logs = new();
-    private string _logSearch = string.Empty;
-    private HashSet<string> _activeLogTypes = new(_allLogTypes);
-    private bool _logAutoScroll = true;
-
-    private IEnumerable<LogEntry> FilteredLogs => _logs
-        .Where(e => _activeLogTypes.Contains(e.Type))
-        .Where(e => string.IsNullOrWhiteSpace(_logSearch) ||
-                    e.Message.Contains(_logSearch, StringComparison.OrdinalIgnoreCase));
-
     protected override void OnInitialized()
     {
         _terminal = TerminalManager.GetByPort(Port);
         if (_terminal == null) return;
 
         _terminal.OnConnectionChanged += OnConnectionChanged;
-        _terminal.OnLogEntry += OnLogEntry;
-        _logs = _terminal.GetRecentLogs(500).ToList();
         LoadFiles();
     }
 
@@ -343,26 +276,6 @@
 
     private void OnConnectionChanged() => InvokeAsync(StateHasChanged);
 
-    private void OnLogEntry(LogEntry entry)
-    {
-        InvokeAsync(async () =>
-        {
-            _logs.Add(entry);
-            if (_logs.Count > 1000) _logs.RemoveAt(0);
-            StateHasChanged();
-            if (_logAutoScroll)
-            {
-                await Task.Delay(50);
-                await JS.InvokeVoidAsync("scrollToBottom", $"terminal-log-bottom-{Port}");
-            }
-        });
-    }
-
-    private void ToggleLogType(string t)
-    {
-        if (!_activeLogTypes.Remove(t)) _activeLogTypes.Add(t);
-    }
-
     private static MarkupString FormatPreview(string text)
     {
         var sb = new System.Text.StringBuilder(text.Length * 2);
@@ -388,22 +301,9 @@
         return sb.ToString();
     }
 
-    private static string GetLogColor(string type) => type switch
-    {
-        "CONNECT"    => "#4ec9b0",
-        "DISCONNECT" => "#ce9178",
-        "INCOMING"   => "#569cd6",
-        "DATA"       => "#9cdcfe",
-        "OUTGOING"   => "#4ec9b0",
-        "ERROR"      => "#f44747",
-        "SYSTEM"     => "#888888",
-        _            => "#cccccc"
-    };
-
     public void Dispose()
     {
         if (_terminal == null) return;
         _terminal.OnConnectionChanged -= OnConnectionChanged;
-        _terminal.OnLogEntry -= OnLogEntry;
     }
 }

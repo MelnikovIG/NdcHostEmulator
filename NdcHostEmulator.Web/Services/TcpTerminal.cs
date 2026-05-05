@@ -19,7 +19,6 @@ public sealed class TcpTerminal : IAsyncDisposable
     private NetworkStream? _clientStream;
     private CancellationTokenSource? _readCancellationSource;
     private CancellationTokenSource? _listenerCancellationSource;
-    private TaskCompletionSource<bool>? _awaitingResponse;
 
     public int Port { get; }
     public string Name { get; set; }
@@ -67,9 +66,9 @@ public sealed class TcpTerminal : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    public async Task StopAsync()
+    public Task StopAsync()
     {
-        if (!IsListening) return;
+        if (!IsListening) return Task.CompletedTask;
 
         _listenerCancellationSource?.Cancel();
         CleanupConnection();
@@ -81,8 +80,7 @@ public sealed class TcpTerminal : IAsyncDisposable
 
         AddLog("SYSTEM", "Server stopped");
         OnConnectionChanged?.Invoke();
-
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     public async Task DisconnectClient()
@@ -105,46 +103,11 @@ public sealed class TcpTerminal : IAsyncDisposable
         OnConnectionChanged?.Invoke();
     }
 
-    public async Task SendFile(string filePath)
-    {
-        if (!IsClientConnected)
-            throw new InvalidOperationException("No client connected.");
-
-        var cancelToken = _readCancellationSource?.Token ?? CancellationToken.None;
-        var fileData = await File.ReadAllTextAsync(filePath);
-        var commands = fileData.Split("[FIELD]").Where(x => x.Length > 0).ToArray();
-
-        for (int i = 0; i < commands.Length; i++)
-        {
-            var byteData = Encoding.UTF8.GetBytes(commands[i]);
-            byte[] header = [(byte)(byteData.Length / 256), (byte)(byteData.Length % 256)];
-
-            await _writeSemaphore.WaitAsync();
-            try
-            {
-                if (_clientStream is { CanWrite: true })
-                {
-                    await _clientStream.WriteAsync(header);
-                    await _clientStream.WriteAsync(byteData);
-                }
-                else throw new InvalidOperationException("Connection lost during file send.");
-            }
-            finally { _writeSemaphore.Release(); }
-
-            AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
-            AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(byteData)));
-            await WaitForResponseAsync($"cmd {i + 1}/{commands.Length}", cancelToken);
-        }
-
-        AddLog("OUTGOING", $"File '{Path.GetFileName(filePath)}' sent: {commands.Length} commands");
-    }
-
     public async Task SendContent(string content)
     {
         if (!IsClientConnected)
             throw new InvalidOperationException("No client connected.");
 
-        var cancelToken = _readCancellationSource?.Token ?? CancellationToken.None;
         var commands = content.Split("[FIELD]").Where(x => x.Length > 0).ToArray();
 
         for (int i = 0; i < commands.Length; i++)
@@ -166,29 +129,7 @@ public sealed class TcpTerminal : IAsyncDisposable
 
             AddLog("OUTGOING", $"Command {i + 1}/{commands.Length} -- {byteData.Length} bytes");
             AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(byteData)));
-            await WaitForResponseAsync($"cmd {i + 1}/{commands.Length}", cancelToken);
         }
-    }
-
-    public async Task SendText(string text)
-    {
-        if (!IsClientConnected)
-            throw new InvalidOperationException("No client connected.");
-
-        var bytes = Encoding.UTF8.GetBytes(text);
-        await _writeSemaphore.WaitAsync();
-        try
-        {
-            if (_clientStream is { CanWrite: true })
-                await _clientStream.WriteAsync(bytes);
-            else
-                throw new InvalidOperationException("Connection lost.");
-        }
-        finally { _writeSemaphore.Release(); }
-
-        var cancelToken = _readCancellationSource?.Token ?? CancellationToken.None;
-        AddLog("OUTGOING", $"Text sent ({bytes.Length} bytes): {FormatWithNamedChars(text)}");
-        await WaitForResponseAsync("text", cancelToken);
     }
 
     public async ValueTask DisposeAsync()
@@ -250,8 +191,6 @@ public sealed class TcpTerminal : IAsyncDisposable
                     AddLog("INCOMING", $"Incoming TCP data ({bytesRead} bytes, {messages.Count} msg):");
                     foreach (var msg in messages)
                         AddLog("DATA", FormatWithNamedChars(Encoding.UTF8.GetString(msg)));
-
-                    Interlocked.Exchange(ref _awaitingResponse, null)?.TrySetResult(true);
                 }
                 else
                 {
@@ -262,23 +201,6 @@ public sealed class TcpTerminal : IAsyncDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { AddLog("ERROR", $"Read error: {ex.Message}"); HandleClientDisconnected(); }
-    }
-
-    private async Task WaitForResponseAsync(string context, CancellationToken cancellationToken)
-    {
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Interlocked.Exchange(ref _awaitingResponse, tcs);
-        AddLog("SYSTEM", $"Waiting for response ({context})...");
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
-        try { await tcs.Task.WaitAsync(timeoutCts.Token); }
-        catch (OperationCanceledException)
-        {
-            Interlocked.CompareExchange(ref _awaitingResponse, null, tcs);
-            AddLog("SYSTEM", cancellationToken.IsCancellationRequested
-                ? $"Connection lost while waiting for response ({context})"
-                : $"Timeout waiting for response ({context})");
-        }
     }
 
     private static bool IsSocketConnected(TcpClient client)
