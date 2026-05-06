@@ -24,3 +24,20 @@
     font-size: 1em;
     vertical-align: baseline;
 }
+
+.terminal-tabs {
+    display: flex;
+    flex-direction: column;
+}
+
+.terminal-tabs > .mud-tabs-panels {
+    flex: 1;
+    min-height: 0;
+    height: auto !important;
+    overflow: hidden !important;
+}
+
+.terminal-tabs > .mud-tabs-panels > .mud-tab-panel {
+    height: 100%;
+    overflow: hidden;
+}

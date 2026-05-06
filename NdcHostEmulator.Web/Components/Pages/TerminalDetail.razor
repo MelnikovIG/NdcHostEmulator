@@ -14,7 +14,8 @@
 
 <PageTitle>@_terminal.Name — NDC Host Emulator</PageTitle>
 
-<MudStack Spacing="0" Style="height:100%;overflow:hidden;">
+<div style="height:100%;display:flex;flex-direction:column;overflow:hidden;">
+<MudStack Spacing="0" Style="flex:1;min-height:0;overflow:hidden;">
     <!-- Breadcrumb -->
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mb-2">
         <MudLink Href="/" Typo="Typo.body2" Color="Color.Primary">Dashboard</MudLink>
@@ -37,7 +38,7 @@
     </MudStack>
 
     <!-- Tabs -->
-    <MudTabs Elevation="1" Rounded="false" @bind-ActivePanelIndex="_activeTab" Style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+    <MudTabs Elevation="1" Rounded="false" @bind-ActivePanelIndex="_activeTab" Class="terminal-tabs" Style="flex:1;min-height:0;overflow:hidden;">
 
         <!-- Статус -->
         <MudTabPanel Text="Статус" Icon="@Icons.Material.Filled.Info">
@@ -93,39 +94,38 @@
 
         <!-- Файлы -->
         <MudTabPanel Text="Файлы" Icon="@Icons.Material.Filled.Folder">
-            <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;padding:12px;gap:8px;">
-                <!-- Тулбар: выбор файла + отправка -->
-                <MudPaper Elevation="1" Class="pa-2">
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.NoWrap">
-                        <MudMenu StartIcon="@Icons.Material.Filled.FolderOpen"
-                                 Label="Выбрать файл"
-                                 Variant="Variant.Outlined"
-                                 Color="Color.Default"
-                                 Size="Size.Small"
-                                 Disabled="@(_files.Count == 0)">
-                            @foreach (var f in _files)
-                            {
-                                <MudMenuItem OnClick="@(() => LoadFileIntoEditor(f))">
-                                    <MudStack Spacing="0">
-                                        <MudText Typo="Typo.body2">@f.Name</MudText>
-                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@f.SizeFormatted</MudText>
-                                    </MudStack>
-                                </MudMenuItem>
-                            }
-                        </MudMenu>
-                        <MudTooltip Text="Обновить список файлов">
-                            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
-                                           Size="Size.Small"
-                                           OnClick="LoadFiles" />
-                        </MudTooltip>
-                        @if (_selectedFile != null)
+            <div style="display:flex;height:100%;overflow:hidden;background:#1e1e1e;">
+
+                <!-- Левая панель: список файлов -->
+                <div style="width:200px;min-width:200px;border-right:1px solid #333;display:flex;flex-direction:column;">
+                    <div style="padding:4px 8px;border-bottom:1px solid #333;display:flex;align-items:center;">
+                        <MudText Typo="Typo.caption" Style="color:#888;flex:1;">Файлы</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                       Size="Size.Small"
+                                       Style="color:#666;padding:2px;"
+                                       OnClick="LoadFiles" />
+                    </div>
+                    <div style="flex:1;min-height:0;overflow-y:auto;">
+                        @if (_files.Count == 0)
                         {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Primary"
-                                     OnClose="ClearEditor">
-                                @_selectedFile.Name
-                            </MudChip>
+                            <span style="color:#555;font-size:12px;padding:8px 12px;display:block;">Нет файлов</span>
                         }
-                        <MudSpacer />
+                        @foreach (var f in _files)
+                        {
+                            <div style="padding:5px 12px;cursor:pointer;font-size:12px;font-family:monospace;
+                                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                                        background:@(_selectedFile == f ? "#094771" : "transparent");
+                                        color:@(_selectedFile == f ? "#fff" : "#bbb");"
+                                 @onclick="() => LoadFileIntoEditor(f)">
+                                @f.Name
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Правая панель: тулбар + редактор -->
+                <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+                    <div style="padding:4px 8px;border-bottom:1px solid #333;display:flex;justify-content:flex-end;background:#252526;">
                         <MudButton Variant="Variant.Filled"
                                    Color="Color.Primary"
                                    StartIcon="@Icons.Material.Filled.Send"
@@ -142,32 +142,32 @@
                                 <span>Отправить</span>
                             }
                         </MudButton>
-                    </MudStack>
-                </MudPaper>
-
-                <!-- Редактор -->
-                <div style="flex:1;min-height:0;border-radius:4px;overflow:hidden;">
-                    <div @ref="_editorRef"
-                         contenteditable="true"
-                         spellcheck="false"
-                         style="height:100%;padding:10px 12px;font-family:monospace;font-size:11px;
-                                background:#1e1e1e;color:#ccc;overflow:auto;
-                                white-space:pre-wrap;word-break:break-all;
-                                border:none;outline:none;box-sizing:border-box;"></div>
+                    </div>
+                    <div style="flex:1;min-height:0;">
+                        <div @ref="_editorRef"
+                             contenteditable="true"
+                             spellcheck="false"
+                             style="height:100%;padding:10px 12px;font-family:monospace;font-size:11px;
+                                    background:#1e1e1e;color:#ccc;overflow:auto;
+                                    white-space:pre-wrap;word-break:break-all;
+                                    border:none;outline:none;box-sizing:border-box;"></div>
+                    </div>
+                    @if (_sendResult != null)
+                    {
+                        <MudAlert Severity="@_sendResult.Severity" Dense="true"
+                                  ShowCloseIcon="true" CloseIconClicked="() => _sendResult = null">
+                            @_sendResult.Message
+                        </MudAlert>
+                    }
                 </div>
 
-                @if (_sendResult != null)
-                {
-                    <MudAlert Severity="@_sendResult.Severity" Dense="true"
-                              ShowCloseIcon="true" CloseIconClicked="() => _sendResult = null">
-                        @_sendResult.Message
-                    </MudAlert>
-                }
             </div>
         </MudTabPanel>
 
     </MudTabs>
 </MudStack>
+<LiveLogPanel Port="Port" />
+</div>
 
 @code {
     [Parameter] public int Port { get; set; }
@@ -177,10 +177,7 @@
     private bool _isSending;
 
     // Files tab
-    private sealed record FileItem(string Name, string FullPath, long SizeBytes, DateTime LastModified)
-    {
-        public string SizeFormatted => SizeBytes >= 1024 ? $"{SizeBytes / 1024.0:F1} KB" : $"{SizeBytes} B";
-    }
+    private sealed record FileItem(string Name, string FullPath);
     private sealed record SendResultInfo(Severity Severity, string Message);
     private List<FileItem> _files = new();
     private FileItem? _selectedFile;
@@ -216,7 +213,7 @@
         _files = Directory.GetFiles(dir)
             .Select(f => new FileInfo(f))
             .OrderBy(f => f.Name)
-            .Select(f => new FileItem(f.Name, f.FullName, f.Length, f.LastWriteTime))
+            .Select(f => new FileItem(f.Name, f.FullName))
             .ToList();
     }
 
@@ -226,13 +223,6 @@
         _sendResult = null;
         try { _editorContent = await File.ReadAllTextAsync(file.FullPath); }
         catch (Exception ex) { _editorContent = $"Ошибка чтения: {ex.Message}"; }
-        _needsEditorUpdate = true;
-    }
-
-    private void ClearEditor()
-    {
-        _selectedFile = null;
-        _editorContent = string.Empty;
         _needsEditorUpdate = true;
     }
 

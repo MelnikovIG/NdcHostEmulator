@@ -1,5 +1,4 @@
 @inject TerminalManager TerminalManager
-@inject NavigationManager NavigationManager
 @inject IJSRuntime JS
 @implements IDisposable
 
@@ -12,12 +11,7 @@
         </div>
         <div style="display: flex; align-items: center; padding: 2px 12px; background: #252526; border-bottom: 1px solid #333;">
             <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Style="color: #888; margin-right: 6px;" />
-            <MudText Typo="Typo.caption" Style="color: #ccc; flex: 1;">
-                @if (_currentPort.HasValue)
-                { <span>Live Log — порт @_currentPort</span> }
-                else
-                { <span>Live Log</span> }
-            </MudText>
+            <MudText Typo="Typo.caption" Style="color: #ccc; flex: 1;">Live Log — порт @Port</MudText>
             <MudText Typo="Typo.caption" Style="color: #666; margin-right: 8px;">@_logs.Count</MudText>
             <MudTooltip Text="Очистить">
                 <MudIconButton Icon="@Icons.Material.Filled.ClearAll"
@@ -31,7 +25,7 @@
             @foreach (var entry in _logs)
             {
                 <div style="padding: 1px 12px; color: @GetLogColor(entry.Type);">
-                    <span style="color: #555; user-select: none;"> [@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
+                    <span style="color: #555; user-select: none;">[@entry.Timestamp.ToString("HH:mm:ss.fff")]</span>
                     <span style="font-weight: bold;"> [@entry.Type]</span>
                     <span style="color: #bbb;"> @entry.Message</span>
                 </div>
@@ -42,15 +36,19 @@
 </div>
 
 @code {
+    [Parameter, EditorRequired] public int Port { get; set; }
+
     private readonly List<LogEntry> _logs = new();
-    private int? _currentPort;
 
     protected override void OnInitialized()
     {
-        _currentPort = TryGetCurrentPort();
-        LoadInitialLogs();
+        var terminal = TerminalManager.GetByPort(Port);
+        if (terminal != null)
+        {
+            foreach (var e in terminal.GetRecentLogs(200))
+                _logs.Add(e);
+        }
         TerminalManager.OnAnyLog += OnAnyLog;
-        NavigationManager.LocationChanged += OnLocationChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -64,32 +62,9 @@
         }
     }
 
-    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-    {
-        var newPort = TryGetCurrentPort();
-        if (newPort == _currentPort) return;
-        _currentPort = newPort;
-        InvokeAsync(() =>
-        {
-            _logs.Clear();
-            LoadInitialLogs();
-            StateHasChanged();
-        });
-    }
-
-    private void LoadInitialLogs()
-    {
-        if (!_currentPort.HasValue) return;
-        var terminal = TerminalManager.GetByPort(_currentPort.Value);
-        if (terminal == null) return;
-        foreach (var e in terminal.GetRecentLogs(200))
-            _logs.Add(e);
-        if (_logs.Count > 200) _logs.RemoveRange(0, _logs.Count - 200);
-    }
-
     private void OnAnyLog(int port, LogEntry entry)
     {
-        if (!_currentPort.HasValue || port != _currentPort.Value) return;
+        if (port != Port) return;
         InvokeAsync(async () =>
         {
             _logs.Add(entry);
@@ -97,12 +72,6 @@
             StateHasChanged();
             await JS.InvokeVoidAsync("scrollToBottom", "live-log-bottom");
         });
-    }
-
-    private int? TryGetCurrentPort()
-    {
-        var path = new Uri(NavigationManager.Uri).AbsolutePath.Trim('/').Split('/');
-        return path.Length == 2 && path[0] == "terminal" && int.TryParse(path[1], out var p) ? p : null;
     }
 
     private static string GetLogColor(string type) => type switch
@@ -117,9 +86,5 @@
         _            => "#cccccc"
     };
 
-    public void Dispose()
-    {
-        TerminalManager.OnAnyLog -= OnAnyLog;
-        NavigationManager.LocationChanged -= OnLocationChanged;
-    }
+    public void Dispose() => TerminalManager.OnAnyLog -= OnAnyLog;
 }
